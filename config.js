@@ -5,8 +5,8 @@
    Se deixar como está, o diário funciona em "modo local" (dados só neste navegador).
    ============================================================ */
 window.FIREBASE_CONFIG = {
-  apiKey: "SUA_API_KEY",
-  authDomain: "SEU_PROJETO.firebaseapp.com",
-  projectId: "SEU_PROJETO",
-  appId: "SEU_APP_ID"
+  apiKey: "AIzaSyBVpFP3dHfZtIx9BpX2oWcUoQAoXCgC8g0",
+  authDomain: "diario-visitas-controller.firebaseapp.com",
+  projectId: "diario-visitas-controller",
+  appId: "1:651439676237:web:c327105b974ad2338af504"
 };
