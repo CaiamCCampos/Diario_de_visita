@@ -1,7 +1,7 @@
 {
   "name": "Diário de Visitas Técnicas",
   "short_name": "Diário",
-  "start_url": "index.html",
+  "start_url": "https://caiamccampos.github.io/Diario_de_visita/",
   "scope": "./",
   "display": "standalone",
   "background_color": "#ffffff",
