@@ -7,6 +7,7 @@
     <meta name="theme-color" content="#c81e2c" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Diário" />
+    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icon-180.png" />
     <link rel="icon" type="image/png" href="icon-192.png" />
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
@@ -363,7 +364,83 @@
           grid-template-columns: 1fr;
         }
       }
-    </style>
+
+      /* ===== LAYOUT: cabeçalho escuro (logo branca), sistema centralizado e fundo no computador ===== */
+      header {
+        background: #18222e;
+        border: 0;
+        border-top: 4px solid var(--r);
+        border-radius: 12px;
+        color: #fff;
+      }
+      .htop .logo {
+        height: 60px;
+        max-width: calc(100% - 90px);
+      }
+      header .chip {
+        color: #d7dde5;
+        border-color: rgba(255, 255, 255, 0.35);
+        background: transparent;
+      }
+      header .chip.ok {
+        color: #6fd48b;
+        border-color: #6fd48b;
+      }
+      header .chip.warn {
+        color: #ffc15a;
+        border-color: #ffc15a;
+      }
+      header .b.o {
+        background: transparent;
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.5);
+      }
+      .login img {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        background: #18222e;
+        border-radius: 10px;
+        padding: 14px 18px;
+        margin-bottom: 12px;
+      }
+      @media (min-width: 900px) {
+        body {
+          background: #0d2a4d url(fundo.jpg) center / cover fixed no-repeat;
+          min-height: 100vh;
+        }
+        .app {
+          margin: 28px auto;
+          max-width: 1000px;
+          padding: 18px 22px 40px;
+          border-radius: 16px;
+          background: #fff;
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+        .app:has(> .login) {
+          background: transparent;
+          box-shadow: none;
+        }
+        .login {
+          margin-top: 10vh;
+          background: #fff;
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+      }
+    /* ===== Foto no fundo do cabeçalho e do logo do login (fundo-topo.jpg) ===== */
+header{background:linear-gradient(rgba(10,25,45,.45),rgba(10,25,45,.45)),url(fundo.jpg) center 50%/cover no-repeat !important;border-top:4px solid var(--r)}
+.htop{padding-top:6px;padding-bottom:6px}
+.htop .logo{height:64px}
+@media (min-width:900px){
+ body{background:#0d2a4d url(fundo.jpg) center/cover fixed no-repeat}
+ 
+ .htop .logo{height:84px}
+ .login{margin-top:10vh}
+ .login img{background:linear-gradient(rgba(10,25,45,.45),rgba(10,25,45,.45)),url(fundo.jpg) center 50%/cover no-repeat !important;border-radius:10px;padding:22px 30px;box-sizing:border-box}
+}
+.login img{background:linear-gradient(rgba(10,25,45,.45),rgba(10,25,45,.45)),url(fundo.jpg) center 50%/cover no-repeat !important}
+</style>
   </head>
   <body>
     <div id="app" class="app"></div>
@@ -1195,7 +1272,7 @@
    7. TELAS
    ================================================================== */
       function vLogin() {
-        return `<div class="card login"><img src="logo.png" alt="Controller BMS" onerror="this.style.display='none'">
+        return `<div class="card login"><img src="logo-branca.png" alt="Controller BMS" onerror="this.style.display='none'">
   <h3>Diário de Visitas Técnicas</h3><label>E-mail</label><input id="lemail" type="email" autocomplete="username">
   <label>Senha</label><input id="lsenha" type="password" autocomplete="current-password">
   <button class="b" data-a="login" style="width:100%">Entrar</button><button class="b o s" data-a="resetpw">Esqueci a senha</button>
@@ -1203,7 +1280,7 @@
       }
       function vHeader() {
         // linha de cima: logo à esquerda e botão Sair fixo à direita; embaixo: quem está logado e o estado de gravação
-        return `<header><div class="htop"><img src="logo.png" class="logo" alt="Controller BMS" onerror="this.style.display='none'">
+        return `<header><div class="htop"><img src="logo-branca.png" class="logo" alt="Controller BMS" onerror="this.style.display='none'">
   ${DB.mode === "firebase" ? '<button class="b o s hsair" data-a="logout">Sair</button>' : '<span class="chip warn">modo local</span>'}</div>
   <div class="hr"><span class="chip chipuser">${esc(meuNome())} · ${PAPEIS[S.me.papel]}${S.me.equipeId ? " · " + esc(eqNome(S.me.equipeId)) : ""}</span><span id="savestat" class="chip ok">${saveLabel()}</span></div></header>`;
       }
@@ -1221,7 +1298,7 @@
 
       // primeiro acesso: a pessoa troca a senha que o administrador definiu
       function vTrocaSenha() {
-        return `<div class="card login"><img src="logo.png" alt="Controller BMS" onerror="this.style.display='none'"><h3>Crie sua senha</h3>
+        return `<div class="card login"><img src="logo-branca.png" alt="Controller BMS" onerror="this.style.display='none'"><h3>Crie sua senha</h3>
   <p class="sm">Este é o seu primeiro acesso. Por segurança, troque a senha que recebeu por uma só sua (mínimo 6 caracteres).</p>
   <label>Senha atual (a que você recebeu)</label><input id="tsatual" type="password" autocomplete="current-password">
   <label>Nova senha</label><input id="tsnova" type="password" autocomplete="new-password">
@@ -1230,7 +1307,7 @@
   <div class="err" id="tserr">${esc(S.trocaErro || "")}</div></div>`;
       }
       function vSemAcesso() {
-        return `<div class="card login"><img src="logo.png" alt="Controller BMS" onerror="this.style.display='none'"><h3>Sem acesso</h3><p>${esc(S.semAcesso)}</p>
+        return `<div class="card login"><img src="logo-branca.png" alt="Controller BMS" onerror="this.style.display='none'"><h3>Sem acesso</h3><p>${esc(S.semAcesso)}</p>
   ${DB.mode === "firebase" ? '<button class="b" data-a="logout" style="width:100%">Sair</button>' : ""}</div>`;
       }
       function vEquipeSel() {
@@ -2887,16 +2964,22 @@
           if (n1.length < 6) return void (er.textContent = "A nova senha precisa ter no mínimo 6 caracteres.");
           if (n1 !== n2) return void (er.textContent = "As duas senhas novas não são iguais.");
           if (n1 === at) return void (er.textContent = "A nova senha precisa ser diferente da senha que você recebeu.");
+          let senhaTrocada = false;
           try {
             const u = DB.auth.currentUser;
             await DB.authM.reauthenticateWithCredential(u, DB.authM.EmailAuthProvider.credential(u.email, at));
             await DB.authM.updatePassword(u, n1);
+            senhaTrocada = true;
             await DB.set("usuarios", S.user.uid, { ...S.me, trocarSenha: false });
             S.trocaSenha = false;
             toast("Senha alterada");
             await start();
           } catch (e) {
             console.error(e);
+            if (senhaTrocada) {   // a senha já mudou no login; só faltou registrar no banco
+              er.textContent = "Sua senha FOI alterada, mas não consegui concluir o registro (" + (e.code || e.message) + "). Toque em Sair, entre com a NOVA senha e avise o administrador para publicar as regras do Firestore.";
+              return;
+            }
             er.textContent =
               e.code === "auth/invalid-credential" || e.code === "auth/wrong-password"
                 ? "A senha atual está incorreta."
