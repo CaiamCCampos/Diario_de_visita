@@ -1419,7 +1419,7 @@ label { background: #fff; }
    ================================================================== */
       function vLogin() {
         return `<div class="card login"><img src="logo-branca.png" alt="Controller BMS" onerror="this.style.display='none'">
-  <h3>Diário de Visitas Técnicas</h3><label>E-mail</label><input id="lemail" type="email" autocomplete="username">
+                <label>E-mail</label><input id="lemail" type="email" autocomplete="username">
   <label>Senha</label><input id="lsenha" type="password" autocomplete="current-password">
   <button class="b" data-a="login" style="width:100%">Entrar</button><button class="b o s" data-a="resetpw">Esqueci a senha</button>
   <div class="err" id="lerr">${esc(S.aviso || "")}</div></div>`;
