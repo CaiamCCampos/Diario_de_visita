@@ -10,6 +10,5 @@ window.FIREBASE_CONFIG = {
   projectId: "diario-visitas-controller",
   appId: "1:651439676237:web:c327105b974ad2338af504"
 };
-
-window.FIREBASE_APPCHECK_KEY = "6Lco-CMuAAAAAF1pB4Syin-O0uR9v4lginBHFqPl";
+window.FIREBASE_APPCHECK_KEY = "6Lco-CMuAAAAAAR19n3GOa2u5TQhgo1ZYfXC2FQ6";
 window.FIREBASE_APPCHECK_TIPO = "enterprise";
