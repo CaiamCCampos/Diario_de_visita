@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="pt-BR" translate="no">
+<head>
+<meta charset="utf-8" />
+<meta name="google" content="notranslate" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Simulado SDAI</title>
+<style>
+:root{--r:#c8202f;--d:#4a5560;--l:#dfe3e8;--f:#f4f6f8}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--f);color:#1d2630;font-size:15px}
+header{background:#18222e;color:#fff;padding:12px 14px;border-top:4px solid var(--r)}
+header h1{margin:0;font-size:17px}
+header p{margin:2px 0 0;font-size:12px;opacity:.8}
+main{max-width:760px;margin:0 auto;padding:10px 10px 90px}
+.card{background:#fff;border:1px solid var(--l);border-radius:12px;margin:10px 0;padding:14px}
+details{background:#fff;border:1px solid var(--l);border-radius:12px;margin:10px 0;padding:0}
+summary{cursor:pointer;padding:13px 14px;font-weight:700;color:var(--r);list-style:none;display:flex;justify-content:space-between;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary .n{font-weight:600;font-size:12px;color:var(--d);background:var(--f);border-radius:20px;padding:2px 9px}
+.c{padding:0 14px 14px}
+label{display:block;font-size:12px;color:var(--d);margin:9px 0 3px}
+input,select{width:100%;padding:10px;border:1px solid var(--l);border-radius:8px;font:inherit;background:#fbfbfb}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 8px}
+.lin{border:1px solid var(--l);border-radius:10px;padding:8px 10px;margin:8px 0;background:#fcfcfd}
+.lin b{font-size:13px}
+.ant{font-size:12px;color:var(--d);margin:2px 0 4px}
+button{font:inherit;border:0;border-radius:8px;padding:11px 14px;background:var(--r);color:#fff;font-weight:700;cursor:pointer}
+button.o{background:#fff;color:var(--r);border:1px solid var(--r)}
+button.s{padding:6px 10px;font-size:13px}
+.foto{display:inline-block;position:relative;margin:6px 8px 0 0}
+.foto img{height:84px;border-radius:8px;border:1px solid var(--l);display:block}
+.foto i{position:absolute;right:-6px;top:-6px;background:#18222e;color:#fff;border-radius:50%;width:22px;height:22px;text-align:center;line-height:22px;font-style:normal;font-size:13px;cursor:pointer}
+.foto small{display:block;font-size:11px;color:var(--d);text-align:center}
+.sm{font-size:12px;color:var(--d)}
+.barra{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--l);padding:10px;display:flex;gap:8px;justify-content:center}
+.barra button{flex:1;max-width:260px}
+.cam{display:inline-block;background:var(--r);color:#fff;border-radius:8px;padding:10px 14px;font-weight:700;margin-top:8px;cursor:pointer}
+.cam input{display:none}
+.cam.o{background:#fff;color:var(--r);border:1px solid var(--r)}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;background:#18222e;color:#fff;padding:10px 16px;border-radius:20px;display:none;max-width:90%;text-align:center}
+h3{font-size:13px;margin:14px 0 2px;color:var(--d);text-transform:uppercase;letter-spacing:.04em}
+.chip{display:inline-block;border:1px solid var(--l);border-radius:20px;padding:5px 11px;margin:4px 6px 0 0;font-size:13px;background:var(--f);cursor:pointer}
+.chip.on{background:var(--r);color:#fff;border-color:var(--r)}
+.info{background:#f0f7ee;border:1px solid #cfe5c9;border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0}
+</style>
+</head>
+<body>
+<header><h1>Simulado SDAI</h1><p>Protótipo: os dados ficam só neste aparelho</p></header>
+<main id="app"></main>
+<div class="barra" id="barra" style="display:none"><button id="bGerar">Gerar Word</button><button id="bFechar" class="o">Fechar ensaio</button></div>
+<div id="toast"></div>
+<script src="jszip.min.js"></script>
+<script>
+/* Motor de preenchimento do relatório SDAI (usa o Word anterior como modelo).
+   gerarWord(tplBuffer, d) -> Promise<Uint8Array>   (precisa do JSZip carregado) */
+(function (root) {
+  "use strict";
+  const WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const nome = (e) => e.localName;
+
+  // ---------- utilidades de DOM ----------
+  const els = (root, tag) => Array.from(root.getElementsByTagNameNS(WNS, tag));
+  const filhos = (e, tag) => Array.from(e.childNodes).filter((n) => n.nodeType === 1 && nome(n) === tag);
+  function paiP(n) { // parágrafo mais próximo
+    for (let x = n.parentNode; x; x = x.parentNode) if (x.nodeType === 1 && nome(x) === "p") return x;
+    return null;
+  }
+  function mk(doc, tag, attrs, txt) {
+    const e = doc.createElementNS(WNS, "w:" + tag);
+    if (attrs) for (const k in attrs) e.setAttributeNS(WNS, "w:" + k, attrs[k]);
+    if (txt != null) e.textContent = txt;
+    return e;
+  }
+  function run(doc, txt, extra) {
+    const r = mk(doc, "r");
+    if (extra) r.appendChild(extra);
+    const t = mk(doc, "t", null, txt);
+    t.setAttribute("xml:space", "preserve");
+    r.appendChild(t);
+    return r;
+  }
+
+  // troca texto que atravessa vários "runs" do Word, mantendo a formatação do primeiro
+  function trocaP(p, re, fn) {
+    const ts = els(p, "t").filter((t) => paiP(t) === p);
+    if (!ts.length) return false;
+    const txt = ts.map((t) => t.textContent).join("");
+    const ms = [];
+    re.lastIndex = 0;
+    let m;
+    const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    while ((m = g.exec(txt))) {
+      ms.push({ i: m.index, len: m[0].length, rep: fn(m) });
+      if (m[0].length === 0) g.lastIndex++;
+    }
+    if (!ms.length) return false;
+    const pos = []; // início de cada t
+    let a = 0;
+    ts.forEach((t) => { pos.push(a); a += t.textContent.length; });
+    for (let k = ms.length - 1; k >= 0; k--) {
+      const { i, len, rep } = ms[k], fim = i + len;
+      let primeiro = true;
+      ts.forEach((t, n) => {
+        const ini = pos[n], tf = ini + t.textContent.length;
+        if (tf <= i || ini >= fim) { if (!(len === 0 && ini <= i && i <= tf && primeiro)) return; }
+        const s = t.textContent, de = Math.max(i, ini) - ini, ate = Math.min(fim, tf) - ini;
+        const novo = s.slice(0, de) + (primeiro ? rep : "") + s.slice(Math.max(de, ate));
+        t.textContent = novo;
+        t.setAttribute("xml:space", "preserve");
+        primeiro = false;
+      });
+    }
+    return true;
+  }
+  const textoP = (p) => els(p, "t").filter((t) => paiP(t) === p).map((t) => t.textContent).join("");
+
+  // ---------- células e tabelas ----------
+  function setCell(doc, tc, txt) {
+    const ps = filhos(tc, "p");
+    const p = ps[0];
+    ps.slice(1).forEach((x) => tc.removeChild(x));
+    const rs = filhos(p, "r").filter((r) => els(r, "t").length || !els(r, "drawing").length);
+    let base = rs.find((r) => els(r, "t").length) || rs[0];
+    let rpr = base ? filhos(base, "rPr")[0] : null;
+    if (!rpr) { const ppr = filhos(p, "pPr")[0]; if (ppr) rpr = filhos(ppr, "rPr")[0]; }
+    Array.from(p.childNodes).forEach((c) => { if (nome(c) !== "pPr") p.removeChild(c); });
+    p.appendChild(run(doc, String(txt == null ? "" : txt), rpr ? rpr.cloneNode(true) : null));
+  }
+  const textoTc = (tc) => filhos(tc, "p").map(textoP).join(" ").trim();
+  const textoLinha = (tr) => filhos(tr, "tc").map(textoTc).join(" ").replace(/\s+/g, " ").toUpperCase();
+  function achaTabela(body, assin) {
+    return els(body, "tbl").find((t) => textoLinha(filhos(t, "tr")[0]).includes(assin));
+  }
+  function linhasDados(tbl, cab) { return filhos(tbl, "tr").slice(cab); }
+  function preencheFixa(doc, tbl, cab, dados, colIni) { // grava dados nas linhas existentes, a partir da coluna colIni
+    const rs = linhasDados(tbl, cab);
+    dados.forEach((linha, i) => {
+      if (!rs[i]) return;
+      const tcs = filhos(rs[i], "tc");
+      linha.forEach((v, j) => { if (tcs[colIni + j]) setCell(doc, tcs[colIni + j], v); });
+    });
+  }
+  function preencheVar(doc, tbl, cab, dados) { // clona a primeira linha de dados conforme a quantidade
+    const rs = linhasDados(tbl, cab);
+    const modelo = rs[0].cloneNode(true);
+    rs.forEach((r) => tbl.removeChild(r));
+    if (!dados.length) dados = [dados.vazio || []];
+    dados.forEach((linha) => {
+      const tr = modelo.cloneNode(true);
+      filhos(tr, "tc").forEach((tc, j) => setCell(doc, tc, linha[j] == null ? "" : linha[j]));
+      tbl.appendChild(tr);
+    });
+  }
+
+  // ---------- imagens ----------
+  const EMU = 360000; // 1 cm
+  function desenho(doc, rid, id, nomeImg, cx, cy) {
+    const x = `<w:drawing xmlns:w="${WNS}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="${nomeImg}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${nomeImg}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
+    return new DOMParser().parseFromString(x, "application/xml").documentElement;
+  }
+  function tamanho(w, h, n) {
+    const maxW = (n === 1 ? 12 : 7.4) * EMU, maxH = 9 * EMU;
+    let k = Math.min(maxW / w, maxH / h);
+    return [Math.round(w * k), Math.round(h * k)];
+  }
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const br = (iso) => iso.split("-").reverse().join("/");
+
+  // ---------- principal ----------
+  async function gerarWord(tpl, d, JSZip) {
+    JSZip = JSZip || root.JSZip;
+    const zip = await JSZip.loadAsync(tpl);
+    const parser = new DOMParser(), ser = new XMLSerializer();
+    const ler = async (n) => parser.parseFromString(await zip.file(n).async("string"), "application/xml");
+    const docX = await ler("word/document.xml");
+    const body = els(docX, "body")[0];
+    const D = br(d.data), P = br(d.ant);
+    const [ano, mes] = d.data.split("-");
+    const mesNome = MESES[+mes - 1];
+    const ex = (d.exec || []).filter(Boolean);
+    const lista = (a) => (a.length > 1 ? a.slice(0, -1).join(", ") + " e " + a[a.length - 1] : a[0] || "");
+
+    // 1) textos em todas as partes (corpo, cabeçalhos, rodapés)
+    const partes = [["word/document.xml", docX]];
+    for (const n of Object.keys(zip.files)) if (/^word\/(header|footer)\d+\.xml$/.test(n)) partes.push([n, await ler(n)]);
+    const ant0 = d.modelo.dataAnt, atu0 = d.modelo.dataAtual; // datas do relatório usado como modelo
+    for (const [n, x] of partes) {
+      const rodape = /footer/.test(n);
+      for (const p of els(x, "p")) {
+        if (rodape) {
+          (d.modelo.exec || []).forEach((velho, i) => trocaP(p, new RegExp("^\\s*" + velho.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*$"), () => ex[i] || ""));
+          trocaP(p, /MP\s?\d{3}\s?\d{3}/, () => d.ref);
+          continue;
+        }
+        const tx = textoP(p);
+        if (/^De acordo com o descrito nessa documentação/.test(tx)) {
+          trocaP(p, /nessa data de \d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}h/, () => `nessa data de ${D} ${d.horaIni}h`);
+          trocaP(p, /os técnicos .+?(?=,? juntamente)/, () => "os técnicos " + lista(ex));
+          trocaP(p, /MP\s?\d{3}\s?\d{3}/, () => d.ref);
+          if (d.respCliente) trocaP(p, /responsabilidade d[eo] [^.]+\./, () => `responsabilidade de ${d.respCliente}.`);
+          continue;
+        }
+        if (/\(Executante - Controller BMS\)/.test(tx)) { trocaP(p, /^\s*[^(]+(?=\()/, () => (ex[0] || "") + " "); continue; }
+        trocaP(p, /\d{2}\s*\/\s*\d{2}\s*\/\s*\d{4}/, (m) => {
+          const v = m[0].replace(/\s/g, "");
+          return v === ant0 ? P : v === atu0 ? D : m[0];
+        });
+        trocaP(p, /(\d{2})\s*:\s*(\d{2})\s*h\s*[–-]\s*(\d{2})\s*:\s*(\d{2})\s*h/, () => `${d.horaIni}h – ${d.horaFim}h`);
+        trocaP(p, /maio\s*\/\s*2026/i, () => `${mesNome} /${ano}`);
+        trocaP(p, /MP\s?\d{3}\s?\d{3}/, () => d.ref);
+      }
+    }
+
+    // 2) tabelas de medição (anterior = ensaio anterior, atual = deste ensaio)
+    const med = [["ALIMENTAÇÃO ELÉTRICA", "alim", 4, 5], ["LAÇO(S) - LOOP(S)", "lacos", 2, 3], ["SINALIZAÇÃO/SIRENE(S)", "sirenes", 2, 3]];
+    for (const [sig, k, cAnt, nAnt] of med) {
+      const t = achaTabela(body, sig);
+      if (!t) continue;
+      const an = d.med.ant[k], at = d.med.atual[k];
+      preencheFixa(docX, t, 2, an, k === "alim" ? 4 : 2);
+      preencheFixa(docX, t, 2, at, k === "alim" ? 7 : 6);
+    }
+    // 3) tabelas de eventos
+    const ev = [["DATA E HORA EVENTO PAINEL", "acion"], ["DATA E HORA EVENTO PAINEL", "det"], ["CIRCUITO(S) / SIRENE(S) IDENTIFICAÇÃO/TAG", "aviso"], ["DATA E HORA TIPO PAINEL LAÇO ENDEREÇO", "mod"], ["MODELO IDENTIFICAÇÃO/TAG ESTADO", "rep"]];
+    const usadas = new Set();
+    for (const [sig, k] of ev) {
+      const t = els(body, "tbl").find((x) => !usadas.has(x) && textoLinha(filhos(x, "tr")[0]).startsWith(sig));
+      if (!t) continue;
+      usadas.add(t);
+      preencheVar(docX, t, 1, d.ev[k] && d.ev[k].length ? d.ev[k] : [[]]);
+    }
+
+    // 4) fotos
+    const rels = await ler("word/_rels/document.xml.rels");
+    const relRoot = rels.documentElement;
+    let nImg = 0, idDoc = 90000;
+    const novos = []; // {nome, bytes}
+    const rid = {};
+    for (const k of Object.keys(d.fotos || {})) {
+      rid[k] = (d.fotos[k] || []).map((f) => {
+        nImg++;
+        const arq = `sim_${nImg}.jpg`, id = "rIdSim" + nImg;
+        novos.push([arq, f.bytes]);
+        const r = rels.createElementNS(relRoot.namespaceURI, "Relationship");
+        r.setAttribute("Id", id);
+        r.setAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image");
+        r.setAttribute("Target", "media/" + arq);
+        relRoot.appendChild(r);
+        return { id, w: f.w, h: f.h, arq };
+      });
+    }
+    for (const p of els(body, "p").filter((x) => /^\[\[F:\w+\]\]$/.test(textoP(x)))) {
+      const k = textoP(p).slice(4, -2);
+      const cap = p.nextElementSibling;
+      const fs = rid[k] || [];
+      if (!fs.length) { if (cap) cap.parentNode.removeChild(cap); p.parentNode.removeChild(p); continue; }
+      Array.from(p.childNodes).forEach((c) => { if (nome(c) !== "pPr") p.removeChild(c); });
+      fs.forEach((f, i) => {
+        const [cx, cy] = tamanho(f.w, f.h, fs.length);
+        const r = mk(docX, "r");
+        const rp = mk(docX, "rPr"); rp.appendChild(mk(docX, "noProof")); r.appendChild(rp);
+        r.appendChild(docX.importNode(desenho(docX, f.id, ++idDoc, "Foto " + f.arq, cx, cy), true));
+        if (i) p.appendChild(run(docX, "  "));
+        p.appendChild(r);
+      });
+      // legenda reconstruída (texto simples com o número calculado)
+      const ppr = filhos(cap, "pPr")[0];
+      Array.from(cap.childNodes).forEach((c) => { if (c !== ppr) cap.removeChild(c); });
+      cap.setAttribute("data-leg", d.legendas[k] || "");
+      cap.setAttribute("data-cap", "1");
+    }
+    // 5) numeração cacheada das legendas (capítulo-figura)
+    let cap1 = 0, nfig = 0;
+    for (const p of els(body, "p")) {
+      const est = (filhos(p, "pPr")[0] && filhos(filhos(p, "pPr")[0], "pStyle")[0]) || null;
+      const sty = est ? est.getAttributeNS(WNS, "val") : "";
+      if (sty === "Ttulo1" && textoP(p).trim() && textoP(p).trim() !== "Sumário") { cap1++; nfig = 0; }
+      if (p.getAttribute("data-cap")) {
+        nfig++;
+        p.appendChild(run(docX, `Figura ${cap1}\u2011${nfig} ${p.getAttribute("data-leg")}`));
+        p.removeAttribute("data-leg");
+        p.removeAttribute("data-cap");
+      }
+    }
+
+    // 6) grava
+    for (const [n, x] of partes) zip.file(n, ser.serializeToString(x));
+    zip.file("word/_rels/document.xml.rels", ser.serializeToString(rels));
+    novos.forEach(([n, b]) => zip.file("word/media/" + n, b));
+    const ct = await zip.file("[Content_Types].xml").async("string");
+    if (!/Extension="jpg"/.test(ct)) zip.file("[Content_Types].xml", ct.replace("<Default ", '<Default Extension="jpg" ContentType="image/jpeg"/><Default '));
+    return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+  }
+
+  // ---------- leitura do último relatório (cadastro de cliente por MP) ----------
+  const semAcento = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  function classificaFoto(cap) {
+    const t = semAcento(cap);
+    if (/sirene/.test(t) && /tens/.test(t)) return "sirenes";
+    if (/loop|laco/.test(t)) return "lacos";
+    if (/tens/.test(t) && /central|alimenta/.test(t)) return "alim";
+    if (/acionador/.test(t)) return "acion";
+    if (/detector/.test(t)) return "det";
+    if (/catraca/.test(t)) return "catracas";
+    if (/elevador/.test(t)) return "elev";
+    if (/repetid/.test(t)) return "repet";
+    if (/pressuriz/.test(t)) return "press";
+    return null;
+  }
+  async function lerRelatorio(buf, JSZip) {
+    JSZip = JSZip || root.JSZip;
+    const zip = await JSZip.loadAsync(buf);
+    const parser = new DOMParser(), ser = new XMLSerializer();
+    const ler = async (n) => parser.parseFromString(await zip.file(n).async("string"), "application/xml");
+    const docX = await ler("word/document.xml");
+    const body = els(docX, "body")[0];
+    const info = { tem: {}, slots: {}, desc: {}, rotulos: {}, ant: {} };
+    for (const n of Object.keys(zip.files)) {
+      if (!/^word\/(header|footer)\d+\.xml$/.test(n)) continue;
+      const x = await ler(n);
+      const ps = els(x, "p").map(textoP).map((s) => s.trim()).filter(Boolean);
+      const junto = ps.join(" ");
+      if (/footer/.test(n) && !info.mp && !/Erro!/.test(junto)) {
+        const i = ps.findIndex((s) => /^MP\s?\d{3}\s?\d{3}$/.test(s));
+        if (i >= 0) { info.mp = ps[i].replace(/\s/g, ""); const nomes = ps.slice(i + 1); info.resp = nomes.pop(); info.exec = nomes; }
+      }
+      if (/header/.test(n) && !info.dataAtual) {
+        const m = junto.match(/(\d{2})\s*\/\s*(\d{2})\s*\/\s*(\d{4})/);
+        if (m) info.dataAtual = `${m[1]}/${m[2]}/${m[3]}`;
+      }
+    }
+    for (const p of els(body, "p")) {
+      const t = textoP(p).trim();
+      let m;
+      if (!info.dataAnt && (m = t.match(/ensaio anterior.*?(\d{2}\/\d{2}\/\d{4})/))) info.dataAnt = m[1];
+      if (!info.razao && (m = t.match(/^Razão Social:\s*(.+)$/))) info.razao = m[1];
+      if (!info.nome && (m = t.match(/^Cliente:\s*(.+)$/))) info.nome = m[1];
+      if (!info.respCliente && /^De acordo com o descrito/.test(t) && (m = t.match(/responsabilidade d[eo] ([^.]+)\./))) info.respCliente = m[1].trim();
+    }
+    const L = (t, cab) => linhasDados(t, cab).map((tr) => filhos(tr, "tc").map(textoTc));
+    let t = achaTabela(body, "ALIMENTAÇÃO ELÉTRICA");
+    if (t) { const r = L(t, 2); info.tem.alim = true; info.rotulos.alim = r.map((x) => x[0]); info.ant.alim = r.map((x) => [x[7], x[8], x[9]]); }
+    t = achaTabela(body, "LAÇO(S) - LOOP(S)");
+    if (t) { const r = L(t, 2); info.tem.lacos = true; info.rotulos.lacos = r.map((x) => x[1]); info.ant.lacos = r.map((x) => x.slice(6, 10)); }
+    t = achaTabela(body, "SINALIZAÇÃO/SIRENE(S)");
+    if (t) { const r = L(t, 2); info.tem.sirenes = true; info.rotulos.sirenes = r.map((x) => x[1]); info.ant.sirenes = r.map((x) => x.slice(6, 10)); }
+    const vistos = new Set();
+    for (const [sig, k] of [["DATA E HORA EVENTO PAINEL", "acion"], ["DATA E HORA EVENTO PAINEL", "det"], ["CIRCUITO(S) / SIRENE(S) IDENTIFICAÇÃO/TAG", "aviso"], ["DATA E HORA TIPO PAINEL LAÇO ENDEREÇO", "mod"], ["MODELO IDENTIFICAÇÃO/TAG ESTADO", "rep"]]) {
+      const x = els(body, "tbl").find((y) => !vistos.has(y) && textoLinha(filhos(y, "tr")[0]).startsWith(sig));
+      if (x) {
+        vistos.add(x); info.tem[k] = true;
+        if (k === "aviso" || k === "rep" || k === "mod") (info.ev = info.ev || {})[k] = L(x, 1).map((r) => (k === "mod" ? ["", ...r.slice(1)] : r));
+      }
+    }
+    // espaços de foto: parágrafo com imagem seguido de legenda "Figura …"
+    for (const p of els(body, "p")) {
+      const cap = p.nextElementSibling;
+      if (!cap || nome(cap) !== "p") continue;
+      const capT = textoP(cap).trim();
+      if (!/^Figura/.test(capT)) continue;
+      let key = null;
+      const mm = textoP(p).match(/^\[\[F:(\w+)\]\]$/);
+      if (mm) key = mm[1];
+      else if (els(p, "drawing").length) key = classificaFoto(capT);
+      if (!key) continue;
+      if (!info.desc[key]) info.desc[key] = capT.replace(/^Figura\s*[\d‑\-–]+\s*/, "").replace(/,?\s*\d{2}\/\d{2}\/\d{4}.*$/, "").trim();
+      info.slots[key] = true;
+      if (!mm) {
+        const ppr = filhos(p, "pPr")[0];
+        Array.from(p.childNodes).forEach((c) => { if (c !== ppr) p.removeChild(c); });
+        p.appendChild(run(docX, `[[F:${key}]]`));
+      }
+    }
+    // remove fotos antigas que não são mais usadas
+    const rels = await ler("word/_rels/document.xml.rels");
+    const xmlDoc = ser.serializeToString(docX);
+    const usados = new Set([...xmlDoc.matchAll(/r:(?:embed|id|link)="([^"]+)"/g)].map((m) => m[1]));
+    Array.from(rels.documentElement.childNodes).forEach((r) => {
+      if (r.nodeType !== 1) return;
+      const tg = r.getAttribute("Target") || "";
+      if (/^media\//.test(tg) && !usados.has(r.getAttribute("Id"))) { zip.remove("word/" + tg); r.parentNode.removeChild(r); }
+    });
+    zip.file("word/_rels/document.xml.rels", ser.serializeToString(rels));
+    zip.file("word/document.xml", xmlDoc);
+    info.bytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+    return info;
+  }
+  root.lerRelatorio = lerRelatorio;
+  root.gerarWord = gerarWord;
+})(typeof window !== "undefined" ? window : globalThis);
+
+</script>
+<script>
+"use strict";
+const MP_PADRAO = "MP000558";
+const hoje = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+const hh = (d) => String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+const agora = () => hh(new Date());
+const br = (iso) => iso.split("-").reverse().join("/");
+const iso = (b) => b.split("/").reverse().join("-");
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const normMP = (s) => String(s || "").toUpperCase().replace(/\s/g, "");
+const toast = (m) => { const t = document.getElementById("toast"); t.textContent = m; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = "none"), 3500); };
+
+// ---------- armazenamento no aparelho ----------
+const idb = () => new Promise((ok, no) => { const r = indexedDB.open("simulado", 2); r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains("k")) r.result.createObjectStore("k"); }; r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+async function lerDB(k) { try { const db = await idb(); return await new Promise((ok) => { const q = db.transaction("k").objectStore("k").get(k); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); }); } catch (e) { return null; } }
+async function gravaDB(k, v) { try { const db = await idb(); await new Promise((ok) => { const t = db.transaction("k", "readwrite"); t.objectStore("k").put(v, k); t.oncomplete = ok; t.onerror = ok; }); } catch (e) { console.error(e); } }
+let tg;
+const salva = () => { clearTimeout(tg); tg = setTimeout(() => { if (C && S) gravaDB("ens:" + C.mp, S); }, 300); };
+
+// ---------- dados ----------
+const SLOT_NOME = { alim: "Tensão das centrais (multímetro)", lacos: "Tensão dos laços", sirenes: "Tensão do laço das sirenes", acion: "Acionadores manuais", det: "Detectores", catracas: "Catracas", elev: "Elevadores", repet: "Repetidora", press: "Painel de pressurização" };
+let CL = {}, C = null, S = null;
+async function registra(info) { // cadastra/atualiza o cliente a partir do último relatório
+  const r = {
+    mp: info.mp, nome: info.nome || info.mp, razao: info.razao || "", respCliente: info.respCliente || "",
+    tpl: info.bytes, modeloAtual: info.dataAtual, modeloAnt: info.dataAnt, modeloExec: info.exec || [], resp: info.resp || "",
+    exec: (info.exec || []).slice(), ant: info.ant, antData: iso(info.dataAtual),
+    rotulos: info.rotulos, tem: info.tem, slots: info.slots, desc: info.desc, ev: info.ev || {},
+  };
+  CL[r.mp] = r; await gravaDB("clientes", CL); return r;
+}
+function novoEnsaio(c) {
+  const ev = { acion: [], det: [], mod: [], aviso: [], rep: [] };
+  for (const k of ["aviso", "rep", "mod"]) ev[k] = ((c.ev || {})[k] || []).map((r) => r.slice());
+  return {
+    data: hoje(), horaIni: "07:00", horaFim: "15:00", exec: c.exec.slice(), respCliente: c.respCliente,
+    med: {
+      alim: (c.ant.alim || []).map((r) => [r[0] || "Ok", "", ""]),
+      lacos: (c.ant.lacos || []).map((r) => (r[0] === "-" ? ["-", "-", "-", "-"] : ["OK", "Trouble", "", ""])),
+      sirenes: (c.ant.sirenes || []).map((r) => (r[0] === "-" ? ["-", "-", "-", "-"] : ["OK", "Trouble", "", ""])),
+    },
+    ev, fotos: {}, leg: Object.fromEntries(Object.keys(c.slots).map((k) => [k, { desc: c.desc[k] || "", local: "" }])),
+  };
+}
+async function abre(mp) {
+  C = CL[mp]; S = (await lerDB("ens:" + mp)) || novoEnsaio(C);
+  if (S.data < hoje() && !(S.fotos && Object.keys(S.fotos).some((k) => (S.fotos[k] || []).length))) S.data = hoje();
+  gravaDB("ultimoMp", mp); render();
+}
+
+// ---------- tela ----------
+const aberto = new Set();
+const get = (p) => p.split(".").reduce((o, k) => (o == null ? "" : o[k]), S);
+const set = (p, v) => { const ks = p.split("."); const u = ks.pop(); ks.reduce((o, k) => o[k], S)[u] = v; salva(); };
+const inp = (p, l, o = {}) => `<div><label>${l}</label><input data-p="${p}" value="${esc(get(p))}" ${o.type ? `type="${o.type}"` : ""} ${o.inputmode ? `inputmode="${o.inputmode}"` : ""}></div>`;
+const sel = (p, l, ops) => `<div><label>${l}</label><select data-p="${p}">${ops.map((o) => `<option${get(p) === o ? " selected" : ""}>${esc(o)}</option>`).join("")}</select></div>`;
+const det = (k, tit, n, corpo) => `<details data-k="${k}"${aberto.has(k) ? " open" : ""}><summary>${tit}${n != null ? `<span class="n">${n}</span>` : ""}</summary><div class="c">${corpo}</div></details>`;
+function fotosHtml(k) {
+  if (!C.slots[k]) return "";
+  const fs = S.fotos[k] || [], l = S.leg[k];
+  return `<h3>Fotos — ${esc(SLOT_NOME[k])}</h3>${fs.map((f, i) => `<span class="foto"><img src="${f.url}"><i data-del="${k}.${i}">×</i><small>${f.hora}h</small></span>`).join("")}<br>
+  <label class="cam">📷 Tirar foto<input type="file" accept="image/*" capture="environment" data-foto="${k}"></label> <label class="cam o">🖼️ Da galeria<input type="file" accept="image/*" multiple data-foto="${k}" data-gal="1"></label>
+  <div class="g2"><div><label>Descrição da legenda</label><input data-p="leg.${k}.desc" value="${esc(l.desc)}"></div><div><label>Local (opcional)</label><input data-p="leg.${k}.local" value="${esc(l.local)}"></div></div>`;
+}
+function medHtml(k) {
+  return S.med[k].map((r, i) => {
+    const a = C.ant[k][i], b = `med.${k}.${i}`;
+    const antTxt = k === "alim" ? `anterior: ${a[0]} · ${a[1]} V · ${a[2]} A` : `anterior: ${a[0]} · ${a[1]} · ${a[2]} V · ${a[3]} A`;
+    return `<div class="lin"><b>${esc(C.rotulos[k][i])}</b><div class="ant">${esc(antTxt)}</div>` + (k === "alim"
+      ? `<div class="g3">${sel(b + ".0", "Estado", ["Ok", "OK", "Falha"])}${inp(b + ".1", "Tensão (V)", { inputmode: "decimal" })}${inp(b + ".2", "Corrente (A)", { inputmode: "decimal" })}</div>`
+      : `<div class="g2">${sel(b + ".0", "Estado", ["OK", "Falha", "-"])}${sel(b + ".1", "Supervisão", ["Trouble", "OK", "-"])}${inp(b + ".2", "Tensão (V)", { inputmode: "decimal" })}${inp(b + ".3", "Corrente (A)", { inputmode: "decimal" })}</div>`) + `</div>`;
+  }).join("");
+}
+function evHtml(k, cols) {
+  const b = (i, j) => `ev.${k}.${i}.${j}`;
+  return (S.ev[k] || []).map((r, i) => `<div class="lin"><div class="g2">${cols.map((c, j) => c.sel ? sel(b(i, j), c.t, c.sel) : inp(b(i, j), c.t, { type: c.type })).join("")}</div><button class="o s" data-rm="${k}.${i}">remover</button></div>`).join("") + `<button class="o s" data-add="${k}">+ adicionar</button>`;
+}
+const COLS = {
+  acion: [{ t: "Hora", type: "time" }, { t: "Evento", sel: ["ALARME"] }, { t: "Painel" }, { t: "Laço" }, { t: "Endereço" }, { t: "Tag" }, { t: "Local" }],
+  mod: [{ t: "Hora", type: "time" }, { t: "Tipo", sel: ["MODULO COMANDO", "MODULO MONITOR"] }, { t: "Painel" }, { t: "Laço" }, { t: "Endereço" }, { t: "Tag" }, { t: "Local" }],
+  aviso: [{ t: "Circuito" }, { t: "Tag" }, { t: "Estado", sel: ["Satisfatório", "Falha"] }, { t: "Tipo de alerta" }, { t: "Local" }],
+  rep: [{ t: "Modelo" }, { t: "Tag" }, { t: "Estado", sel: ["Satisfatório", "Falha"] }, { t: "Tipo" }, { t: "Local" }],
+};
+function cartaoMP(msg) {
+  const chips = Object.values(CL).map((c) => `<span class="chip${C && C.mp === c.mp ? " on" : ""}" data-mp="${c.mp}">${esc(c.mp)} · ${esc(c.nome)}</span>`).join("");
+  return `<div class="card"><label style="margin-top:0">MP do cliente</label><div style="display:flex;gap:8px"><input id="mp" placeholder="ex.: MP000558" value="${esc(C ? C.mp : "")}" autocapitalize="characters"><button id="bMP" style="white-space:nowrap">Abrir</button></div>${chips ? `<div>${chips}</div>` : ""}${msg || ""}</div>`;
+}
+function render(msgMP) {
+  const app = document.getElementById("app");
+  document.getElementById("barra").style.display = C ? "flex" : "none";
+  if (!C) { app.innerHTML = cartaoMP(msgMP); return; }
+  const T = C.tem, nIt = (k) => (S.ev[k] || []).length;
+  app.innerHTML = cartaoMP() +
+    `<div class="info"><b>${esc(C.nome)}</b><br>${esc(C.razao)}<br>Ensaio anterior: <b>${br(C.antData)}</b> · Este ensaio: <b>${br(S.data)}</b><br><span class="sm">Valores do ensaio anterior, aparelhos e responsáveis já vieram preenchidos.</span></div>` +
+    det("cab", "1. Dados do ensaio", null, `<div class="g2">${inp("data", "Data do ensaio", { type: "date" })}<div><label>Referência</label><input value="${esc(C.mp)}" disabled></div>${inp("horaIni", "Hora de início", { type: "time" })}${inp("horaFim", "Hora de término", { type: "time" })}</div>
+      <h3>Execução</h3><div class="g3">${(C.modeloExec || []).map((_, i) => inp("exec." + i, "Técnico " + (i + 1))).join("")}</div>${inp("respCliente", "Responsável do cliente")}`) +
+    (T.alim ? det("m1", "2. Alimentação (fontes e baterias)", null, medHtml("alim") + fotosHtml("alim")) : "") +
+    (T.lacos ? det("m2", "3. Laços", null, medHtml("lacos") + fotosHtml("lacos")) : "") +
+    (T.sirenes ? det("m3", "4. Sirenes (circuitos)", null, medHtml("sirenes") + fotosHtml("sirenes")) : "") +
+    (T.acion ? det("e1", "5. Acionadores manuais", nIt("acion"), evHtml("acion", COLS.acion) + fotosHtml("acion")) : "") +
+    (T.det ? det("e2", "6. Detectores", nIt("det"), evHtml("det", COLS.acion) + fotosHtml("det")) : "") +
+    (T.aviso ? det("e3", "7. Avisadores (sirenes)", nIt("aviso"), evHtml("aviso", COLS.aviso)) : "") +
+    (T.mod ? det("e4", "8. Módulos", nIt("mod"), evHtml("mod", COLS.mod) + fotosHtml("catracas") + fotosHtml("elev")) : "") +
+    (T.rep ? det("e5", "9. Repetidora", null, evHtml("rep", COLS.rep) + fotosHtml("repet")) : "") +
+    (C.slots.press ? det("e6", "10. Pressurização", null, fotosHtml("press")) : "");
+}
+const A = document.getElementById("app");
+A.addEventListener("toggle", (e) => { const k = e.target.dataset && e.target.dataset.k; if (k) e.target.open ? aberto.add(k) : aberto.delete(k); }, true);
+A.addEventListener("input", (e) => { const p = e.target.dataset.p; if (p) set(p, e.target.value); });
+async function abrirMP() {
+  const mp = normMP(document.getElementById("mp").value);
+  if (!mp) return;
+  if (CL[mp]) return abre(mp);
+  C = null; S = null;
+  render(`<div class="info" style="background:#fff7e6;border-color:#f0d9a8">Esta MP ainda não está cadastrada. Envie o <b>último relatório (.docx)</b> deste cliente. O sistema lê os dados e já deixa tudo pronto.<br><label class="cam" style="margin-top:10px">📄 Escolher o relatório (.docx)<input type="file" accept=".docx" id="novoCli" data-mp="${esc(mp)}"></label></div>`);
+  document.getElementById("mp").value = mp;
+}
+A.addEventListener("click", async (e) => {
+  const t = e.target;
+  if (t.id === "bMP") return abrirMP();
+  if (t.dataset.mp && t.classList.contains("chip")) return abre(t.dataset.mp);
+  if (t.dataset.add) { const k = t.dataset.add, hora = agora(); const linha = { acion: [hora, "ALARME", "", "", "", "", ""], det: [hora, "ALARME", "", "", "", "", ""], mod: [hora, "MODULO COMANDO", "", "", "", "", ""], aviso: ["Sirene", "", "Satisfatório", "Audiovisual", ""], rep: ["", "", "Satisfatório", "Ativo", ""] }[k]; S.ev[k].push(linha); salva(); render(); }
+  if (t.dataset.rm) { const [k, i] = t.dataset.rm.split("."); S.ev[k].splice(+i, 1); salva(); render(); }
+  if (t.dataset.del) { const [k, i] = t.dataset.del.split("."); S.fotos[k].splice(+i, 1); salva(); render(); }
+});
+A.addEventListener("keydown", (e) => { if (e.target.id === "mp" && e.key === "Enter") abrirMP(); });
+A.addEventListener("change", async (e) => {
+  const t = e.target;
+  if (t.id === "novoCli" && t.files[0]) {
+    try {
+      toast("Lendo o relatório…");
+      const info = await lerRelatorio(await t.files[0].arrayBuffer(), JSZip);
+      if (!info.mp) return toast("Não achei a MP neste relatório");
+      if (info.mp !== t.dataset.mp && !confirm(`O relatório é da ${info.mp}, não da ${t.dataset.mp}. Cadastrar como ${info.mp}?`)) return;
+      const r = await registra(info); await abre(r.mp); toast("Cliente cadastrado: " + r.nome);
+    } catch (er) { console.error(er); toast("Não consegui ler este relatório"); }
+    return;
+  }
+  const k = t.dataset.foto; if (!k || !t.files[0]) return;
+  const gal = !!t.dataset.gal, arqs = Array.from(t.files);
+  try { for (const a of arqs) { const f = await reduz(a, gal); (S.fotos[k] = S.fotos[k] || []).push(f); } salva(); render(); }
+  catch (er) { toast("Não consegui ler a foto"); console.error(er); }
+});
+function reduz(file, daGaleria) { // reduz para 1280 px e converte em JPEG
+  return new Promise((ok, no) => {
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, 1280 / Math.max(im.width, im.height)), w = Math.round(im.width * k), h = Math.round(im.height * k);
+      const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(im, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      c.toBlob(async (b) => { const buf = new Uint8Array(await b.arrayBuffer()); ok({ bytes: buf, w, h, hora: daGaleria && file.lastModified ? hh(new Date(file.lastModified)) : agora(), url: "data:image/jpeg;base64," + b64(buf) }); }, "image/jpeg", 0.8);
+    };
+    im.onerror = no; im.src = url;
+  });
+}
+function b64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192)); return btoa(s); }
+
+// ---------- Word ----------
+function dadosWord() {
+  const D = br(S.data), dh = (h) => `${D} – ${h || S.horaIni}h`;
+  const lin = (r) => [dh(r[0]), ...r.slice(1)];
+  const fotos = {}, legendas = {};
+  for (const k of Object.keys(C.slots)) {
+    fotos[k] = (S.fotos[k] || []).map((f) => ({ bytes: f.bytes, w: f.w, h: f.h }));
+    const l = S.leg[k], horas = (S.fotos[k] || []).map((f) => f.hora).filter((v, i, a) => a.indexOf(v) === i);
+    legendas[k] = `${l.desc}${l.local ? ", " + l.local : ""}, ${D}${horas.length ? " – " + horas.join(" e ") + "h" : ""}`;
+  }
+  return {
+    data: S.data, ant: C.antData, horaIni: S.horaIni, horaFim: S.horaFim, ref: C.mp, exec: S.exec, respCliente: S.respCliente,
+    modelo: { dataAnt: C.modeloAnt, dataAtual: C.modeloAtual, exec: C.modeloExec },
+    med: { ant: C.ant, atual: S.med },
+    ev: { acion: S.ev.acion.map(lin), det: S.ev.det.map(lin), mod: S.ev.mod.map(lin), aviso: S.ev.aviso, rep: S.ev.rep },
+    fotos, legendas,
+  };
+}
+document.getElementById("bGerar").onclick = async () => {
+  try {
+    toast("Gerando o Word…");
+    const out = await gerarWord(C.tpl, dadosWord(), JSZip);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
+    a.download = `${C.mp}_RSDAI_${S.data.split("-").reverse().join("_")}.docx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    toast("Word gerado");
+  } catch (e) { console.error(e); toast("Erro ao gerar: " + e.message); }
+};
+document.getElementById("bFechar").onclick = async () => {
+  if (!confirm('Fechar o ensaio? Os valores de hoje viram o "anterior" do próximo ensaio e os campos são limpos.')) return;
+  C.ant = { alim: S.med.alim.map((r) => r.slice()), lacos: S.med.lacos.map((r) => r.slice()), sirenes: S.med.sirenes.map((r) => r.slice()) };
+  C.antData = S.data; C.exec = S.exec.slice(); C.respCliente = S.respCliente;
+  C.ev = { ...C.ev, aviso: S.ev.aviso.map((r) => r.slice()), rep: S.ev.rep.map((r) => r.slice()), mod: S.ev.mod.map((r) => ["", ...r.slice(1)]) };
+  CL[C.mp] = C; await gravaDB("clientes", CL);
+  S = novoEnsaio(C); await gravaDB("ens:" + C.mp, S); render(); toast("Ensaio fechado");
+};
+(async () => {
+  CL = (await lerDB("clientes")) || {};
+  if (!CL[MP_PADRAO]) { try { const info = await lerRelatorio(await (await fetch("modelo-union.docx")).arrayBuffer(), JSZip); await registra(info); } catch (e) { console.error(e); } }
+  const ult = await lerDB("ultimoMp");
+  if (ult && CL[ult]) await abre(ult); else render();
+})();
+</script>
+</body>
+</html>
