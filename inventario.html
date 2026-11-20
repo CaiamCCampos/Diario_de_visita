@@ -1831,7 +1831,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                   t = tipoCat(sel);
                 const criar =
                   !sel && pode("inv.criarTipo")
-                    ? `<div class="row" style="margin-top:6px;align-items:center"><div><input data-novo="${esc(k)}" value="${esc((E.novo || {})[k] ?? nomeNovoTipo(sis, tp))}" placeholder="Nome do tipo novo"></div><div style="flex:0 0 auto;min-width:0"><button class="b s" data-a="criaTipo" data-k="${esc(k)}" style="margin:0">Criar no catálogo</button></div></div>${txt(tp).length <= 3 && !((S.meta && S.meta.legenda) || {})[sis + "|" + tp] ? '<div class="sm">É uma sigla: troque pelo nome completo (ex.: Detector de fumaça) antes de criar.</div>' : ""}`
+                    ? `<div class="row" style="margin-top:6px;align-items:flex-end"><div><label style="margin:0 0 2px">Nome do tipo</label><input data-novo="${esc(k)}" value="${esc((E.novo || {})[k] ?? nomeNovoTipo(sis, tp))}" placeholder="Nome do tipo novo"></div><div><label style="margin:0 0 2px">Nome do perfil</label><input data-novopf="${esc(k)}" value="${esc((E.novoPf || {})[k] ?? "Padrão")}" placeholder="Ex.: Padrão, Inspeção, Software"></div><div style="flex:0 0 auto;min-width:0"><button class="b s" data-a="criaTipo" data-k="${esc(k)}" style="margin:0">Criar no catálogo</button></div></div>${txt(tp).length <= 3 && !((S.meta && S.meta.legenda) || {})[sis + "|" + tp] ? '<div class="sm">É uma sigla: troque pelo nome completo (ex.: Detector de fumaça) antes de criar.</div>' : ""}`
                     : "";
                 const nota = E.mapa[k] !== undefined && E.mapa[k] !== salvo ? '<div class="sm am">alterado, falta salvar</div>' : !salvo && sug ? '<div class="sm" style="color:var(--warn)">sugestão: confira e salve</div>' : !salvo ? '<div class="sm rd">sem catálogo</div>' : "";
                 const selecao = t ? (E.selecao[t.id] !== undefined ? E.selecao[t.id] : selecaoDe(t.id)) : "";
@@ -1852,7 +1852,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           }).map((tp) => chaveTipo(sis, tp)),
         );
         const topo = semLig.length && pode("inv.criarTipo") ? `<div class="top" style="margin:8px 0"><span class="sm">${semLig.length} tipo${semLig.length > 1 ? "s" : ""} sem ligação e sem sugestão</span><button class="b" data-a="criaTodos" style="margin:0">Criar no catálogo todos os que faltam (${semLig.length})</button></div>` : "";
-        return `${topo}<div class="note" style="background:#f6f6f7">Ligue cada tipo que veio da planilha a um tipo do <b>Catálogo do diário</b>: é de lá que vêm as atividades da preventiva. A ligação vale para <b>todos os clientes</b> (a próxima planilha já entra ligada); o perfil vale só para este cliente. Tipo que não existe no catálogo: clique em <b>Criar no catálogo</b> (o nome vem da Legenda ou da planilha; o tipo nasce com o perfil Padrão e atividades básicas, que você ajusta depois no Catálogo do diário).${ed ? "" : " Só supervisor e administrador alteram."}</div>
+        return `${topo}<div class="note" style="background:#f6f6f7">Ligue cada tipo que veio da planilha a um tipo do <b>Catálogo do diário</b>: é de lá que vêm as atividades da preventiva. A ligação vale para <b>todos os clientes</b> (a próxima planilha já entra ligada); o perfil vale só para este cliente. Tipo que não existe no catálogo: dê o nome do tipo e do perfil e clique em <b>Criar no catálogo</b> (o nome vem da Legenda ou da planilha; o perfil nasce com atividades básicas, que você ajusta depois no Catálogo do diário). Se o tipo já existir com esse nome, o perfil é acrescentado nele.${ed ? "" : " Só supervisor e administrador alteram."}</div>
   ${blocos}${ed ? '<button class="b" data-a="salvaCat" style="width:100%">Salvar ligações com o catálogo</button>' : ""}<button class="b o" data-a="diarioCat" style="width:100%">Abrir o Catálogo no diário</button>`;
       }
 
@@ -2382,13 +2382,17 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
 
       /* cria tipos novos no Catálogo do diário e já liga os tipos da planilha a eles */
       async function criaTipos(chaves) {
-        const nomes = {};
+        const nomes = {},
+          perfisNovos = {};
         for (const k of chaves) {
-          const el = document.querySelector(`[data-novo="${CSS.escape(k)}"]`);
+          const el = document.querySelector(`[data-novo="${CSS.escape(k)}"]`),
+            ep = document.querySelector(`[data-novopf="${CSS.escape(k)}"]`);
           const n = txt(el ? el.value : "");
           if (!n) return toast("Preencha o nome do tipo novo");
           nomes[k] = n;
+          perfisNovos[k] = txt(ep ? ep.value : "") || "Padrão";
         }
+        const ppNovo = {};
         try {
           const cat = (await DB.get("catalogo", "dados")) || { id: "dados", sis: [], tipos: [] }; // lê o mais recente antes de gravar
           cat.tipos = cat.tipos || [];
@@ -2401,11 +2405,23 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             const sis = k.split("|")[0],
               sigla = sisCat(sis);
             const igual = cat.tipos.find((t) => t.sis === sigla && semAcento(t.nome).toUpperCase() === semAcento(nome).toUpperCase());
+            const pfNome = perfisNovos[k];
             let id;
-            if (igual) id = igual.id;
-            else {
+            if (igual) {
+              // tipo já existe: usa o perfil com esse nome ou acrescenta um perfil novo nele
+              id = igual.id;
+              igual.perfis = igual.perfis || [];
+              let i = igual.perfis.findIndex((p) => semAcento(p.nome).toUpperCase() === semAcento(pfNome).toUpperCase());
+              if (i < 0) {
+                igual.perfis.push({ nome: pfNome, atv: ATV_PADRAO.slice() });
+                i = igual.perfis.length - 1;
+                novos++;
+              }
+              ppNovo[id] = i;
+            } else {
               id = uid();
-              cat.tipos.push({ id, sis: sigla, nome, extra: /^NVR\b/i.test(nome) ? "dias" : "", perfis: [{ nome: "Padrão", atv: ATV_PADRAO.slice() }], criadoPor: "inventário", criadoEm: agora() });
+              cat.tipos.push({ id, sis: sigla, nome, extra: /^NVR\b/i.test(nome) ? "dias" : "", perfis: [{ nome: pfNome, atv: ATV_PADRAO.slice() }], criadoPor: "inventário", criadoEm: agora() });
+              ppNovo[id] = 0;
               novos++;
             }
             cfg.mapa[k] = id;
@@ -2421,8 +2437,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             if (S.catEd && S.catEd.mapa) delete S.catEd.mapa[k];
           });
           audita("criou tipos no catálogo", "catalogo", "dados", `${cliNome(S.cliId)} · ${Object.values(nomes).join(", ")}`.slice(0, 300));
-          await salvaMeta();
-          toast(`${novos} tipo${novos === 1 ? "" : "s"} criado${novos === 1 ? "" : "s"} no catálogo · ${ligados} ligado${ligados === 1 ? "" : "s"}`);
+          await salvaMeta((m) => (m.perfilPadrao = { ...(m.perfilPadrao || {}), ...ppNovo }));
+          toast(`${novos} criado${novos === 1 ? "" : "s"} no catálogo · ${ligados} tipo${ligados === 1 ? "" : "s"} ligado${ligados === 1 ? "" : "s"}`);
           render();
         } catch (e) {
           console.error(e);
@@ -2526,6 +2542,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (ev.target.dataset && ev.target.dataset.novo !== undefined) {
           S.catEd = S.catEd || { mapa: {}, selecao: {}, pp: {} };
           (S.catEd.novo = S.catEd.novo || {})[ev.target.dataset.novo] = ev.target.value;
+          return;
+        }
+        if (ev.target.dataset && ev.target.dataset.novopf !== undefined) {
+          S.catEd = S.catEd || { mapa: {}, selecao: {}, pp: {} };
+          (S.catEd.novoPf = S.catEd.novoPf || {})[ev.target.dataset.novopf] = ev.target.value;
           return;
         }
         const f = ev.target.dataset && ev.target.dataset.f;
