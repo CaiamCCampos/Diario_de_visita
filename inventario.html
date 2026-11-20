@@ -965,7 +965,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       // técnico: vê, confirma o acesso e corrige login/senha.
       const PERM = {
         admin: ["*"],
-        supervisor: ["inv.editar", "inv.acesso", "inv.confirmar", "inv.alertas", "inv.legenda"],
+        supervisor: ["inv.editar", "inv.acesso", "inv.confirmar", "inv.alertas", "inv.legenda", "inv.catalogo"],
         tecnico: ["inv.acesso", "inv.confirmar"],
       };
       const pode = (a) => {
@@ -1202,6 +1202,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             itens.push(it);
           }
         }
+        // servidores, NVRs, gerenciadoras e centrais (blocos ao lado da tabela) viram dispositivos, no começo da lista
+        for (const sis of Object.keys(centrais)) {
+          const extras = Object.entries(centrais[sis]).map(([nome, campos]) => centralParaItem(sis, nome, campos));
+          sistemas[sis] = [...extras, ...(sistemas[sis] || [])];
+          centrais[sis] = {};
+        }
         const cont = {};
         titulos.forEach((t) => (cont[t[2]] = (cont[t[2]] || 0) + 1));
         const cliente = Object.entries(cont).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
@@ -1210,6 +1216,35 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             importAlertas.push({ chave: `Título de outro cliente|${aba}|${t}`, tipo: "Título de outro cliente", sis, texto: `Título "${t}" na aba ${aba} (cliente do arquivo: ${cliente}); conferir se a aba foi copiada de outro cliente` });
         const equivalencias = Object.entries(equiv).map(([k, q]) => [...k.split("|"), q]);
         return { cliente, sistemas, centrais, importAlertas, equivalencias };
+      }
+
+      function centralParaItem(sis, nome, campos) {
+        const it = { tipo: "", modelo: "", fabricante: "", tag: nome, ip: "", pav: "", status: "", obs: "", origem: `bloco ${nome} (aba ${sis})`, detalhes: [], outros: [], login: "", senha: "", login2: "", senha2: "" };
+        if (nome.startsWith("CENTRAL ")) {
+          // tabela de acessos da central (ex.: SDAI: Operador / Master)
+          it.tipo = "CENTRAL";
+          campos.forEach(([k, v], i) => {
+            if (i === 0) Object.assign(it, { login: k, senha: v });
+            else if (i === 1) Object.assign(it, { login2: k, senha2: v });
+            else it.outros.push([k, v]);
+          });
+          return it;
+        }
+        it.tipo = /^NVR\b/.test(nome) ? "NVR" : nome;
+        for (const [k, v] of campos) {
+          if (!v) continue;
+          const K = semAcento(k).toUpperCase().trim();
+          if (K === "MODELO" && !it.modelo) it.modelo = v;
+          else if (K === "FABRICANTE" && !it.fabricante) it.fabricante = v.toUpperCase();
+          else if (K === "IP" && ipValido(v) && !it.ip) it.ip = v;
+          else if (K === "STATUS") it.status = v.toUpperCase();
+          else if (K === "COMPUTER NAME") it.tag = v;
+          else if (K === "LOGIN" && !it.login) it.login = v;
+          else if (K === "SENHA" && !it.senha) it.senha = v;
+          else if (RE_SENHA.test(k)) it.outros.push([k, v]);
+          else it.detalhes.push([k, v]);
+        }
+        return it;
       }
 
       // junta o que veio da planilha com o inventário que já existe: mantém o ID, a confirmação de acesso e a observação
@@ -1275,23 +1310,73 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const [sis, pv] = k.split("|");
           L.push({ chave: `Pavimento|${sis}|${pv}`, tipo: "Pavimento não reconhecido", sis, ids, tag: pv, texto: `"${pv}" em ${plural(ids.length, "item", "itens")}; definir o nome padrão` });
         }
+        if (S.cat && (S.cat.tipos || []).length) {
+          const semCat = {};
+          for (const sis of Object.keys(inv))
+            for (const it of inv[sis].itens || []) if (!tipoCatDe(sis, it)) (semCat[chaveTipo(sis, it.tipo)] = semCat[chaveTipo(sis, it.tipo)] || []).push(it.id);
+          for (const [k, ids] of Object.entries(semCat)) {
+            const [sis, tp] = k.split("|");
+            L.push({ chave: `Tipo sem catálogo|${k}`, tipo: "Tipo sem catálogo", sis, ids, tag: tp, texto: `${plural(ids.length)} do tipo "${tp}" sem tipo do catálogo associado. Associe na aba Catálogo ou crie o tipo no Catálogo do diário.` });
+          }
+        }
         const vistosImp = new Set();
         for (const a of (meta && meta.importAlertas) || []) if (!vistosImp.has(a.chave)) vistosImp.add(a.chave) && L.push({ ids: [], tag: "", ...a });
         const dec = (meta && meta.decisoes) || {};
         L.forEach((a) => Object.assign(a, { sit: "PENDENTE", just: "", por: "", data: "" }, dec[a.chave] || {}));
-        const ordem = { "Título de outro cliente": 0, "TAG duplicada": 1, "IP duplicado": 2, "IP inválido na central": 3, "IP inválido": 4, "Dispositivo sem TAG": 5, "Pavimento não reconhecido": 6 };
+        const ordem = { "Título de outro cliente": 0, "TAG duplicada": 1, "IP duplicado": 2, "IP inválido na central": 3, "IP inválido": 4, "Dispositivo sem TAG": 5, "Pavimento não reconhecido": 6, "Tipo sem catálogo": 7 };
         const oSit = { NOK: 0, PENDENTE: 1, OK: 2 };
         return L.sort((a, b) => oSit[a.sit] - oSit[b.sit] || (ordem[a.tipo] ?? 9) - (ordem[b.tipo] ?? 9) || String(a.sis).localeCompare(b.sis));
       }
       const alertaAtivo = (a) => a.sit !== "OK";
+
+      /* ---- ligação com o catálogo do diário ----
+         catálogo (diário) = tipos de equipamento e perfis de atividades; o inventário só LÊ o catálogo.
+         inventarioConfig/geral.mapa: "SISTEMA|TIPO DA PLANILHA" → id do tipo no catálogo (vale para todos os clientes)
+         inventarioConfig/geral.selecao: id do tipo → "todos" | "escolher" (como o tipo aparece na visita preventiva)
+         inventarioMeta.perfilPadrao: id do tipo → nº do perfil usado neste cliente; dispositivo pode ter tipoCat/perfil próprios */
+      const SIS_CAT = { "AUTOMAÇÃO": "SSCU", "SONORIZAÇÃO": "SSON" };
+      const sisCat = (sis) => SIS_CAT[sis] || sis;
+      const catTipos = (sis) => ((S.cat && S.cat.tipos) || []).filter((t) => t.sis === sisCat(sis));
+      const tipoCat = (id) => ((S.cat && S.cat.tipos) || []).find((t) => t.id === id);
+      const chaveTipo = (sis, tipo) => `${sis}|${String(tipo || "").toUpperCase()}`;
+      const tipoCatDe = (sis, it) => it.tipoCat || ((S.icfg && S.icfg.mapa) || {})[chaveTipo(sis, it.tipo)] || "";
+      const RE_TODOS = /NVR|DVR|SERVIDOR|CENTRAL|PAINEL|GERENCIADORA|AMPLIFICADORA|NOBREAK|SWITCH|PROCESSADOR/i;
+      const selecaoDe = (id) => ((S.icfg && S.icfg.selecao) || {})[id] || (RE_TODOS.test(semAcento((tipoCat(id) || {}).nome || "")) ? "todos" : "escolher");
+      const perfilDe = (sis, it) => {
+        const id = tipoCatDe(sis, it);
+        if (it.perfil !== undefined && it.perfil !== "") return +it.perfil;
+        return +(((S.meta && S.meta.perfilPadrao) || {})[id] || 0);
+      };
+      // sugestão pelo nome (só sugere; quem decide é você ao salvar)
+      const palavras = (x) =>
+        semAcento(x)
+          .toUpperCase()
+          .replace(/[^A-Z0-9 ]/g, " ")
+          .split(/\s+/)
+          .filter((w) => w.length > 2 && !["DOS", "DAS", "COM", "PARA"].includes(w))
+          .map((w) => w.replace(/S$/, ""));
+      function sugereTipo(sis, tipo) {
+        const p = palavras(tipo === "CENTRAL" && sis === "SDAI" ? "PAINEL CENTRAL" : tipo);
+        let melhor = "",
+          nota = 0;
+        for (const t of catTipos(sis)) {
+          const q = palavras(t.nome);
+          const n = p.filter((w) => q.some((y) => y.startsWith(w) || w.startsWith(y))).length;
+          if (n > nota) {
+            nota = n;
+            melhor = t.id;
+          }
+        }
+        return melhor;
+      }
       // login/senha de um dispositivo: do documento de acessos ou, na prévia da importação, do próprio item
       function credDe(sis, it, aces) {
         const a = ((aces && aces[sis]) || {}).acessos || {};
         const c = a[it.id] || it;
         const v = (x) => (x && String(x).trim() !== "-" ? x : ""); // "-" na planilha = sem login/senha
-        return { login: v(c.login), senha: v(c.senha), login2: v(c.login2), senha2: v(c.senha2) };
+        return { login: v(c.login), senha: v(c.senha), login2: v(c.login2), senha2: v(c.senha2), outros: (c.outros || []).filter(([, x]) => v(x)) };
       }
-      const temSenha = (c) => !!(c.login || c.senha || c.login2 || c.senha2);
+      const temSenha = (c) => !!(c.login || c.senha || c.login2 || c.senha2 || (c.outros && c.outros.length));
       // todo dispositivo que tem login/senha começa "a confirmar"; some quando alguém confere em campo e marca Senha OK
       const senhaPend = (sis, it, aces) => temSenha(credDe(sis, it, aces)) && !it.verificado;
       // resumo que fica no inventarioMeta (para a lista de clientes não precisar ler todos os dispositivos)
@@ -1379,6 +1464,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           } else S.me = { uid: "local", nome: "Modo local", papel: new URLSearchParams(location.search).get("papel") || "admin", equipeId: "eq1", ativo: true };
           if (S.semAcesso) return render();
           S.cfg = (await DB.get("config", "dados")) || {};
+          S.cat = (await DB.get("catalogo", "dados")) || { sis: [], tipos: [] };
           S.eq = (await DB.list("equipes")).sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR"));
           if (DB.mode === "local" && !S.eq.length) S.eq = [{ id: "eq1", nome: "Equipe teste" }];
         } catch (e) {
@@ -1402,6 +1488,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           }),
           DB.listen("inventarioMeta", filtro(), null, (a) => {
             S.metas = a;
+            render();
+          }),
+          DB.listen("inventarioConfig", null, null, (a) => {
+            S.icfg = a.find((d) => d.id === "geral") || { id: "geral", mapa: {}, selecao: {} };
             render();
           }),
         );
@@ -1438,14 +1528,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       /* abre um cliente: escuta os documentos do inventário dele */
       function abreCliente(id) {
         parar(unsubCli);
-        Object.assign(S, { cliId: id, view: "cliente", aba: "", inv: {}, aces: {}, meta: null, aberto: "", fBusca: "", fPav: "", fSt: "", fAl: false, fSp: false, lim: 200, vistas: {}, selSen: {}, grAb: {} });
+        Object.assign(S, { cliId: id, view: "cliente", aba: "", inv: {}, aces: {}, meta: null, aberto: "", fBusca: "", fPav: "", fSt: "", fAl: false, fSp: false, lim: 200, vistas: {}, selSen: {}, grAb: {}, catEd: { mapa: {}, selecao: {}, pp: {} } });
         const cli = S.clientes.find((c) => c.id === id);
         const f = ehAdmin() ? { clienteId: id } : { clienteId: id, equipeId: S.me.equipeId };
         unsubCli.push(
           DB.listen("inventario", f, null, (a) => {
             S.inv = {};
             a.forEach((d) => (S.inv[d.sistema] = d));
-            if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
+            if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas", "catalogo"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
             render();
           }),
           DB.listen("inventarioAcessos", f, null, (a) => {
@@ -1558,9 +1648,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const ok = (r.status.ONLINE || 0) + (r.status.OPERANDO || 0),
           base = r.total - (r.status.VAZIO || 0) - (r.status["-"] || 0),
           disp = base ? Math.round((ok / base) * 1000) / 10 : 0;
+        const nSemCat = al.filter((a) => a.tipo === "Tipo sem catálogo" && alertaAtivo(a)).length;
         const abas = [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))];
-        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
-        const corpo = S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
+        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
+        const corpo = S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
         return `<div class="card cinl"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3>${esc(cli.unidade)}</h3><div class="cacts">${cli.mp ? `<span class="chip">${esc(cli.mp)}</span>` : ""}<span class="chip">v${(m && m.versao) || 1}</span>
   <button class="b o s" data-a="exporta">Exportar Excel</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
   <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
@@ -1598,6 +1689,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 let v = esc(it[k] || "");
                 if (k === "status") v = `<span class="st ${esc(it.status || "x")}">${esc(it.status || "—")}</span>`;
                 if (k === "tipo" && leg[sis + "|" + it.tipo]) v += `<div class="sm">${esc(leg[sis + "|" + it.tipo])}</div>`;
+                if (k === "tipo") {
+                  const tc = tipoCat(tipoCatDe(sis, it));
+                  v += tc ? `<div class="sm">→ ${esc(tc.nome)}</div>` : '<div class="sm rd">sem catálogo</div>';
+                }
                 if (k === "id" && comAl.has(it.id)) v += '<span class="tag-al">alerta</span>';
                 if (k === "ip" || k === "id") v = `<span class="mono">${v}</span>`;
                 return `<td data-l="${esc(ROT[k])}"${k === "tag" ? ' class="c-tag"' : ""}>${v}</td>`;
@@ -1642,11 +1737,81 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           .join("");
         return `<div class="sm"><b>${esc(it.id)}</b>${leg[sis + "|" + it.tipo] ? " · " + esc(leg[sis + "|" + it.tipo]) : ""}${it.origem ? " · veio de " + esc(it.origem) : ""}</div>
   <div class="g">${camposSis(sis).map(campo).join("")}</div>
-  <div class="g">${acessos}</div>
+  <div class="g">${acessos}</div>${vItemCat(sis, it)}${vItemDetalhes(sis, it)}
   <label>Observação</label><textarea id="e_obs" rows="2"${ed ? "" : " readonly"}>${esc(it.obs || "")}</textarea>
   <div class="sm" style="margin-top:6px">${it.verificado ? `<span class="ver">Senha confirmada em <b>${dh(it.verificado)}</b>${it.verificadoPor ? " por " + esc(it.verificadoPor) : ""}</span>` : temSenha(credDe(sis, it, S.aces)) ? '<span class="st FALHA">Senha a confirmar</span>' : "Sem login/senha cadastrados."}${it.alteradoEm ? ` · última alteração em ${esc(it.alteradoEm)}${it.alteradoPor ? " por " + esc(it.alteradoPor) : ""}` : ""}</div>
   <div>${ed || edA ? `<button class="b" data-a="salvaItem">Salvar alterações</button>` : ""}${pode("inv.confirmar") ? `<button class="b o" data-a="confirma">Senha OK (confirmar agora)</button>` : ""}${pode("inv.excluir") ? `<button class="b o" data-a="excluiItem">Excluir dispositivo</button>` : ""}<button class="b o" data-a="fechaItem">Fechar</button></div>`;
       }
+      function vItemCat(sis, it) {
+        const ed = pode("inv.editar"),
+          idCat = tipoCatDe(sis, it),
+          tc = tipoCat(idCat);
+        const pf = perfilDe(sis, it),
+          perfis = (tc && tc.perfis) || [],
+          atv = it.atv && it.atv.length ? it.atv : (perfis[pf] || perfis[0] || {}).atv || [];
+        const info = tc
+          ? `<b>${esc(tc.nome)}</b> · perfil <b>${esc((perfis[pf] || perfis[0] || {}).nome || "Padrão")}</b> · ${selecaoDe(tc.id) === "todos" ? "entra marcado na preventiva" : "escolhido na preventiva"}${it.tipoCat ? ' <span class="chip">definido só para este dispositivo</span>' : ""}`
+          : '<span class="rd">Sem tipo do catálogo.</span> Associe na aba Catálogo (vale para todos deste tipo) ou aqui só para este dispositivo.';
+        const sel = ed
+          ? `<div class="g"><div><label>Tipo do catálogo só deste dispositivo</label><select id="e_tipoCat"><option value="">— usar a ligação do tipo "${esc(it.tipo)}" —</option>${catTipos(sis)
+              .map((t) => `<option value="${esc(t.id)}"${t.id === it.tipoCat ? " selected" : ""}>${esc(t.nome)}</option>`)
+              .join("")}</select></div>${
+              perfis.length > 1
+                ? `<div><label>Perfil só deste dispositivo</label><select id="e_perfil"><option value="">— usar o perfil padrão do cliente —</option>${perfis.map((p, i) => `<option value="${i}"${it.perfil !== undefined && it.perfil !== "" && +it.perfil === i ? " selected" : ""}>${esc(p.nome)}</option>`).join("")}</select></div>`
+                : ""
+            }</div>`
+          : "";
+        return `<div class="cent"><b class="rd">Catálogo</b><div class="sm" style="margin:4px 0">${info}</div>${atv.length ? `<details><summary>Atividades da preventiva (${atv.length})</summary>${atv.map((a) => `<div class="sm">· ${esc(a)}</div>`).join("")}</details>` : ""}${sel}</div>`;
+      }
+      function vItemDetalhes(sis, it) {
+        const det = it.detalhes || [],
+          outros = (((S.aces[sis] || {}).acessos || {})[it.id] || {}).outros || [];
+        if (!det.length && !outros.length) return "";
+        const lo = outros
+          .map(([k, v], i) => {
+            const id = `ou_${it.id}_${i}`;
+            return `<tr><td>${esc(k)}</td><td>${S.vistas[id] ? esc(v) : "••••••"} <button class="b o s" data-a="verSenha" data-id="${esc(id)}" style="margin:0 0 0 6px">${S.vistas[id] ? "Ocultar" : "Mostrar"}</button></td></tr>`;
+          })
+          .join("");
+        return `<div class="cent"><b class="rd">Detalhes</b><table>${det.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}${lo}</table></div>`;
+      }
+
+      /* ---- aba Catálogo: liga os tipos da planilha aos tipos do Catálogo do diário ---- */
+      function vCatInv() {
+        const ed = pode("inv.catalogo");
+        if (!S.cat || !(S.cat.tipos || []).length) return '<div class="card"><p class="sm">Não consegui ler o Catálogo do diário.</p></div>';
+        const E = (S.catEd = S.catEd || { mapa: {}, selecao: {}, pp: {} });
+        const mapa = (S.icfg && S.icfg.mapa) || {},
+          pp = (S.meta && S.meta.perfilPadrao) || {};
+        const blocos = SISTEMAS.filter((s) => S.inv[s])
+          .map((sis) => {
+            const cont = {};
+            (S.inv[sis].itens || []).forEach((it) => (cont[it.tipo] = (cont[it.tipo] || 0) + 1));
+            const tipos = catTipos(sis);
+            const linhas = Object.entries(cont)
+              .sort((a, b) => b[1] - a[1])
+              .map(([tp, q]) => {
+                const k = chaveTipo(sis, tp),
+                  salvo = mapa[k] || "",
+                  sug = salvo ? "" : sugereTipo(sis, tp),
+                  sel = E.mapa[k] !== undefined ? E.mapa[k] : salvo || sug,
+                  t = tipoCat(sel);
+                const nota = E.mapa[k] !== undefined && E.mapa[k] !== salvo ? '<div class="sm am">alterado, falta salvar</div>' : !salvo && sug ? '<div class="sm" style="color:var(--warn)">sugestão: confira e salve</div>' : !salvo ? '<div class="sm rd">sem catálogo</div>' : "";
+                const selecao = t ? (E.selecao[t.id] !== undefined ? E.selecao[t.id] : selecaoDe(t.id)) : "";
+                const pf = t ? (E.pp[t.id] !== undefined ? E.pp[t.id] : +(pp[t.id] || 0)) : 0;
+                return `<tr class="it" style="cursor:default"><td data-l="Tipo na planilha"><b>${esc(tp)}</b> <span class="sm">(${q})</span></td>
+  <td data-l="Tipo no catálogo"><select data-map="${esc(k)}"${ed ? "" : " disabled"}><option value="">— sem catálogo —</option>${tipos.map((x) => `<option value="${esc(x.id)}"${x.id === sel ? " selected" : ""}>${esc(x.nome)}</option>`).join("")}</select>${nota}</td>
+  <td data-l="Na preventiva">${t ? `<select data-selecao="${esc(t.id)}"${ed ? "" : " disabled"}><option value="todos"${selecao === "todos" ? " selected" : ""}>Todos (já marcados)</option><option value="escolher"${selecao === "escolher" ? " selected" : ""}>Escolher quais</option></select>` : "—"}</td>
+  <td data-l="Perfil neste cliente">${t ? ((t.perfis || []).length > 1 ? `<select data-pp="${esc(t.id)}"${ed ? "" : " disabled"}>${t.perfis.map((p, i) => `<option value="${i}"${i === pf ? " selected" : ""}>${esc(p.nome)}</option>`).join("")}</select>` : esc(((t.perfis || [])[0] || {}).nome || "Padrão")) : "—"}</td></tr>`;
+              })
+              .join("");
+            return `<div class="card"><h2>${esc(sis)}${sisCat(sis) !== sis ? ` · no catálogo: ${esc(sisCat(sis))}` : ""}</h2><div class="tblw"><table class="tbl"><thead><tr><th>Tipo na planilha</th><th>Tipo no catálogo</th><th>Na visita preventiva</th><th>Perfil neste cliente</th></tr></thead><tbody>${linhas}</tbody></table></div></div>`;
+          })
+          .join("");
+        return `<div class="note" style="background:#f6f6f7">Ligue cada tipo que veio da planilha a um tipo do <b>Catálogo do diário</b>: é de lá que vêm as atividades da preventiva. A ligação vale para <b>todos os clientes</b> (a próxima planilha já entra ligada); o perfil vale só para este cliente. Tipo que não existe no catálogo: crie no Catálogo do diário e volte aqui.${ed ? "" : " Só supervisor e administrador alteram."}</div>
+  ${blocos}${ed ? '<button class="b" data-a="salvaCat" style="width:100%">Salvar ligações com o catálogo</button>' : ""}<button class="b o" data-a="diarioCat" style="width:100%">Abrir o Catálogo no diário</button>`;
+      }
+
       function vCentral(sis, c) {
         const sens = (((S.aces[sis] || {}).centrais || {})[c.nome] || []).map(([k, v], i) => [k, v, `cs_${sis}_${c.nome}_${i}`]);
         const linhas = c.campos.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("");
@@ -1895,6 +2060,16 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               if (el) n[k] = k === "pav" ? normPav(el.value)[0] : k === "fabricante" || k === "status" ? el.value.trim().toUpperCase() : el.value.trim();
             });
             n.obs = $("#e_obs").value.trim();
+            const tc = $("#e_tipoCat"),
+              pf = $("#e_perfil");
+            if (tc) {
+              if (tc.value) n.tipoCat = tc.value;
+              else delete n.tipoCat;
+            }
+            if (pf) {
+              if (pf.value !== "") n.perfil = +pf.value;
+              else delete n.perfil;
+            }
           }
           let mudouAc = false;
           if (pode("inv.acesso")) {
@@ -1915,6 +2090,31 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             if (mudouAc) audita("alterou senha", "inventarioAcessos", doc.id, `${cliNome(S.cliId)} · ${sis} · ${it.id}`);
             toast("Dispositivo salvo");
           }
+        },
+        async salvaCat() {
+          const cfg = clone(S.icfg || { id: "geral" });
+          cfg.id = "geral";
+          cfg.mapa = cfg.mapa || {};
+          cfg.selecao = cfg.selecao || {};
+          document.querySelectorAll("[data-map]").forEach((x) => {
+            if (x.value) cfg.mapa[x.dataset.map] = x.value;
+            else delete cfg.mapa[x.dataset.map];
+          });
+          document.querySelectorAll("[data-selecao]").forEach((x) => (cfg.selecao[x.dataset.selecao] = x.value));
+          cfg.atualizadoEm = agora();
+          cfg.atualizadoPor = meuNome();
+          if (!(await grava("inventarioConfig", "geral", cfg))) return;
+          S.icfg = cfg;
+          const pp = {};
+          document.querySelectorAll("[data-pp]").forEach((x) => (pp[x.dataset.pp] = +x.value));
+          await salvaMeta((m) => (m.perfilPadrao = { ...(m.perfilPadrao || {}), ...pp }));
+          audita("ligou tipos ao catálogo", "inventarioConfig", "geral", cliNome(S.cliId));
+          S.catEd = { mapa: {}, selecao: {}, pp: {} };
+          toast("Ligações com o catálogo salvas");
+          render();
+        },
+        diarioCat() {
+          location.href = "index.html";
         },
         async confirmaSel() {
           const sel = Object.entries(S.selSen || {}).filter(([, v]) => v).map(([k]) => k.split("|"));
@@ -2073,9 +2273,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 ACESSO.forEach((k) => {
                   if (it[k]) a[k] = it[k];
                 });
+                if (it.outros && it.outros.length) a.outros = it.outros;
                 if (Object.keys(a).length) acessos[it.id] = a;
                 const n = { ...it };
                 ACESSO.forEach((k) => delete n[k]);
+                delete n.outros;
+                if (n.detalhes && !n.detalhes.length) delete n.detalhes;
                 return n;
               });
               const fab = Object.entries(limpos.reduce((o, i) => ((o[i.fabricante] = (o[i.fabricante] || 0) + (i.fabricante ? 1 : 0)), o), {})).sort((a, b) => b[1] - a[1])[0];
@@ -2246,6 +2449,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         }
         if (f === "fAl" || f === "fSp") {
           S[f] = t.checked;
+          return render();
+        }
+        if (t.dataset && (t.dataset.map !== undefined || t.dataset.selecao !== undefined || t.dataset.pp !== undefined)) {
+          S.catEd = S.catEd || { mapa: {}, selecao: {}, pp: {} };
+          if (t.dataset.map !== undefined) S.catEd.mapa[t.dataset.map] = t.value;
+          if (t.dataset.selecao !== undefined) S.catEd.selecao[t.dataset.selecao] = t.value;
+          if (t.dataset.pp !== undefined) S.catEd.pp[t.dataset.pp] = +t.value;
           return render();
         }
         if (t.dataset && t.dataset.sel) {

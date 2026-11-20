@@ -1,0 +1,14 @@
+    // Arquivo: regras-inventario-config_2026-11-20.rules
+    // Criado em: 20/11/2026
+    // Conteúdo: coleção inventarioConfig (ligação dos tipos da planilha com o Catálogo do diário,
+    //           e se cada tipo entra "todos" ou "escolher" na visita preventiva)
+    // Onde colar: logo abaixo do bloco do INVENTÁRIO (regras-inventario_2026-11-20.rules),
+    //             ainda antes das duas últimas chaves } do arquivo de regras.
+    // Usa as funções invAtivo() e invPerfil() do bloco do inventário (que já precisa estar publicado).
+    // Todos os usuários ativos leem; só administrador e supervisor alteram; ninguém apaga.
+    match /inventarioConfig/{id} {
+      allow read: if invAtivo();
+      allow create, update: if invAtivo() && invPerfil().get('papel', '') in ['admin', 'supervisor'];
+      allow delete: if false;
+    }
+    // ================= fim do inventarioConfig =================
