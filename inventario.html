@@ -1043,7 +1043,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       // "VERIFICAR" deixou de existir: virou FALHA (planilhas antigas e dados já gravados)
       const normSt = (x) => {
         const v = String(x || "").trim().toUpperCase();
-        return v === "VERIFICAR" ? "FALHA" : v;
+        return v === "VERIFICAR" ? "FALHA" : v === "ON" ? "ONLINE" : v === "OFF" ? "OFFLINE" : v;
       };
       const ACESSO = ["login", "senha", "login2", "senha2"];
       const RE_SENHA = /SENHA|LOGIN|KEY|USUÁRIO|USUARIO|PASSWORD/i;
@@ -1107,6 +1107,15 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
    (mesma lógica do protótipo em Python: acha o cabeçalho pela coluna STATUS, traduz colunas,
     separa os blocos de configurações e padroniza pavimento e status)
    ================================================================== */
+      // sistema da aba: nome exato ou uma palavra do nome ("Levantamento ECOLAB CFTV" → CFTV)
+      function sisDaAba(nome) {
+        const n = semAcento(nome).toUpperCase().trim();
+        const exato = SISTEMAS_ABA[nome.trim().toUpperCase()] || SISTEMAS_ABA[n];
+        if (exato) return exato;
+        const pal = n.split(/[^A-Z0-9]+/).filter(Boolean);
+        const achados = [...new Set(pal.map((w) => SISTEMAS_ABA[w]).filter(Boolean))];
+        return achados.length === 1 ? achados[0] : "";
+      }
       function lerPlanilha(wbx) {
         const sistemas = {},
           centrais = {},
@@ -1114,8 +1123,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           equiv = {},
           titulos = [];
         for (const nomeAba of wbx.SheetNames) {
-          const sistema = SISTEMAS_ABA[nomeAba.trim().toUpperCase()];
-          if (!sistema) continue;
+          const sistema = sisDaAba(nomeAba);
+          if (!sistema) continue; // abas de gráficos, suporte etc.
           const ws = wbx.Sheets[nomeAba];
           if (!ws["!ref"]) continue;
           const rg = XLSX.utils.decode_range(ws["!ref"]);
@@ -1149,6 +1158,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           for (let c = 1; c <= maxC; c++) {
             const t = cel(hr, c).toUpperCase();
             if (t) hdr[c] = t;
+          }
+          if (Object.values(hdr).filter((t) => t === "STATUS").length > 1) {
+            lerBlocos(nomeAba, sistema, cel, hr, maxR, maxC, hdr);
+            continue;
           }
           let ini = sc,
             fim = sc;
@@ -1198,7 +1211,38 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               }
             }
           }
-          // dispositivos
+          lerLinhas(nomeAba, sistema, cel, hr, maxR, mapa, {});
+        }
+        // planilha de levantamento: vários quadros lado a lado (ex.: NVR 01 | NVR 02 | NVR 03), cada um com CANAL, TAG, IP, STATUS
+        function lerBlocos(nomeAba, sistema, cel, hr, maxR, maxC, hdr) {
+          const grupos = [];
+          for (let c = 1; c <= maxC; c++) {
+            if (!hdr[c]) continue;
+            const g = [c];
+            while (hdr[c + 1]) g.push(++c);
+            grupos.push(g);
+          }
+          for (const g of grupos) {
+            if (!g.some((c) => hdr[c] === "STATUS")) continue; // totais, data etc.
+            // título do quadro: a célula acima do cabeçalho (ex.: "NVR 01")
+            let tit = "";
+            for (let r = hr - 1; r >= 1 && !tit; r--) for (const c of g) if ((tit = cel(r, c))) break;
+            const mapa = {};
+            for (const c of g) {
+              const ch = SINONIMOS[hdr[c]];
+              if (!ch) importAlertas.push({ chave: `Coluna não reconhecida|${nomeAba}|${hdr[c]}`, tipo: "Coluna não reconhecida", sis: sistema, texto: `Coluna "${hdr[c]}" da aba ${nomeAba} foi para Observação` });
+              mapa[c] = ch || "extra:" + hdr[c];
+            }
+            const nvr = /^(NVR|DVR)\s*\d*/i.test(tit) ? tit.toUpperCase().replace(/^(NVR|DVR)\s*(\d+)$/, "$1 $2") : "";
+            const n0 = (sistemas[sistema] || []).length;
+            lerLinhas(nomeAba, sistema, cel, hr, maxR, mapa, nvr ? { nvr } : tit ? { obs: tit } : {});
+            // o próprio NVR vira dispositivo (sem IP: completar depois)
+            if (nvr && (sistemas[sistema] || []).length > n0 && !(sistemas[sistema] || []).some((x) => x.tag === nvr && x.tipo === "NVR"))
+              sistemas[sistema].splice(sistemas[sistema].filter((x) => x.tipo === "NVR" && /título do quadro/.test(x.origem)).length, 0, { tipo: "NVR", modelo: "", fabricante: "", tag: nvr, ip: "", pav: "", status: "", obs: "", origem: `${nomeAba} (título do quadro)`, login: "", senha: "", login2: "", senha2: "" });
+          }
+        }
+        // lê as linhas de uma tabela (mapa: coluna → campo); "fixo" completa campos que vêm do quadro (ex.: nvr)
+        function lerLinhas(nomeAba, sistema, cel, hr, maxR, mapa, fixo) {
           const itens = (sistemas[sistema] = sistemas[sistema] || []);
           for (let r = hr + 1; r <= maxR; r++) {
             const reg = {},
@@ -1210,6 +1254,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               } else reg[ch] = v;
             }
             if (!Object.values(reg).some(Boolean) && !extras.length) continue;
+            // só o número do canal preenchido = canal vazio no NVR
+            if (!["tipo", "modelo", "tag", "ip", "status"].some((k) => reg[k]) && !extras.length) continue;
+            if (fixo.nvr && !reg.nvr) reg.nvr = fixo.nvr;
             const it = { tipo: reg.tipo || "", modelo: reg.modelo || "", fabricante: (reg.fabricante || "").toUpperCase(), tag: reg.tag || "", ip: reg.ip || "" };
             if (!it.tipo) {
               if (sistema === "CFTV") {
@@ -1227,7 +1274,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             it.status = normSt(reg.status);
             for (const k of ["nvr", "canal", "laco", "firmware"]) if (reg[k]) it[k] = reg[k];
             for (const k of ACESSO) it[k] = reg[k] || "";
-            it.obs = extras.join("; ");
+            it.obs = [fixo.obs, ...extras].filter(Boolean).join("; ");
             it.origem = `${nomeAba} L${r}`;
             itens.push(it);
           }
