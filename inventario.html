@@ -670,8 +670,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
 .filtros label{margin-top:0}
 .st{display:inline-block;font-size:11px;font-weight:700;border-radius:20px;padding:2px 8px;white-space:nowrap;border:1px solid transparent}
 .st.ONLINE,.st.OPERANDO{background:#e3f4e7;color:#1f6b33;border-color:#a9dcb5}
-.st.VERIFICAR{background:#fff4d6;color:#7a5600;border-color:#f0d58c}
-.st.FALHA,.st.OFFLINE{background:#fde3e3;color:#9c0006;border-color:#f3aaaa}
+.st.FALHA,.st.VERIFICAR{background:#fff4d6;color:#7a5600;border-color:#f0d58c}
+.st.OFFLINE{background:#fde3e3;color:#9c0006;border-color:#f3aaaa}
 .st.VAZIO,.st.x{background:#eee;color:#666;border-color:#ddd}
 .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .tbl th{position:sticky;top:0;background:#2e2f33;color:#fff;text-align:left;font-size:12px;font-weight:600;padding:7px 8px;z-index:1}
@@ -1039,7 +1039,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         "SENHA/REMOTO": "senha2",
         "VERSÃO DE FIRMWARE": "firmware",
       };
-      const STATUS = ["ONLINE", "OPERANDO", "VERIFICAR", "FALHA", "OFFLINE", "VAZIO"];
+      const STATUS = ["ONLINE", "OPERANDO", "FALHA", "OFFLINE", "VAZIO"];
+      // "VERIFICAR" deixou de existir: virou FALHA (planilhas antigas e dados já gravados)
+      const normSt = (x) => {
+        const v = String(x || "").trim().toUpperCase();
+        return v === "VERIFICAR" ? "FALHA" : v;
+      };
       const ACESSO = ["login", "senha", "login2", "senha2"];
       const RE_SENHA = /SENHA|LOGIN|KEY|USUÁRIO|USUARIO|PASSWORD/i;
       // campos extras de cada sistema (além de tipo, modelo, fabricante, TAG, IP, pavimento, status)
@@ -1219,7 +1224,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               const k = `Pavimento|${pOrig}|${it.pav || "(vazio)"}`;
               equiv[k] = (equiv[k] || 0) + 1;
             }
-            it.status = (reg.status || "").toUpperCase();
+            it.status = normSt(reg.status);
             for (const k of ["nvr", "canal", "laco", "firmware"]) if (reg[k]) it[k] = reg[k];
             for (const k of ACESSO) it[k] = reg[k] || "";
             it.obs = extras.join("; ");
@@ -1262,7 +1267,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (K === "MODELO" && !it.modelo) it.modelo = v;
           else if (K === "FABRICANTE" && !it.fabricante) it.fabricante = v.toUpperCase();
           else if (K === "IP" && ipValido(v) && !it.ip) it.ip = v;
-          else if (K === "STATUS") it.status = v.toUpperCase();
+          else if (K === "STATUS") it.status = normSt(v);
           else if (K === "COMPUTER NAME") it.tag = v;
           else if (K === "LOGIN" && !it.login) it.login = v;
           else if (K === "SENHA" && !it.senha) it.senha = v;
@@ -1600,7 +1605,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         unsubCli.push(
           DB.listen("inventario", f, null, (a) => {
             S.inv = {};
-            a.forEach((d) => (S.inv[d.sistema] = d));
+            a.forEach((d) => {
+              (d.itens || []).forEach((it) => it.status && (it.status = normSt(it.status)));
+              S.inv[d.sistema] = d;
+            });
             if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas", "catalogo", "pendencias"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
             render();
           }),
@@ -1731,7 +1739,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         return `<div class="card cinl"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3>${esc(cli.unidade)}</h3><div class="cacts">${cli.mp ? `<span class="chip">${esc(cli.mp)}</span>` : ""}<span class="chip">v${(m && m.versao) || 1}</span>
   ${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
   <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
-  <div class="kpis"><div class="kpi"><div class="r">Dispositivos</div><div class="n">${r.total}</div></div><div class="kpi ok"><div class="r">Disponibilidade</div><div class="n">${String(disp).replace(".", ",")}%</div></div><div class="kpi red"><div class="r">Falha / Offline</div><div class="n">${(r.status.FALHA || 0) + (r.status.OFFLINE || 0)}</div></div><div class="kpi am"><div class="r">Verificar</div><div class="n">${r.status.VERIFICAR || 0}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${r.senhasPend}</div></div><div class="kpi ok"><div class="r">Senhas confirmadas</div><div class="n">${r.verificados}<span class="sm"> de ${r.comSenha}</span></div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${alAt}</div></div></div>
+  <div class="kpis"><div class="kpi"><div class="r">Dispositivos</div><div class="n">${r.total}</div></div><div class="kpi ok"><div class="r">Disponibilidade</div><div class="n">${String(disp).replace(".", ",")}%</div></div><div class="kpi am"><div class="r">Falha</div><div class="n">${r.status.FALHA || 0}</div></div><div class="kpi red"><div class="r">Offline</div><div class="n">${r.status.OFFLINE || 0}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${r.senhasPend}</div></div><div class="kpi ok"><div class="r">Senhas confirmadas</div><div class="n">${r.verificados}<span class="sm"> de ${r.comSenha}</span></div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${alAt}</div></div></div>
   ${tabs}<div class="aux">${corpo}</div>`;
       }
 
@@ -2179,7 +2187,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (pode("inv.editar")) {
             camposSis(sis).forEach((k) => {
               const el = $("#e_" + k);
-              if (el) n[k] = k === "pav" ? normPav(el.value)[0] : k === "fabricante" || k === "status" ? el.value.trim().toUpperCase() : el.value.trim();
+              if (el) n[k] = k === "pav" ? normPav(el.value)[0] : k === "status" ? normSt(el.value) : k === "fabricante" ? el.value.trim().toUpperCase() : el.value.trim();
             });
             n.obs = $("#e_obs").value.trim();
             const tc = $("#e_tipoCat"),
@@ -3048,7 +3056,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             formulae: ["OR(" + vals.map((v) => `${prim}="${v}"`).join(",") + ")"],
             style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: argb(bg) } }, font: { bold: true, color: { argb: argb(fg) } } },
           });
-          ws.addConditionalFormatting({ ref, rules: [regra(["ONLINE", "OPERANDO"], XC.ok), regra(["VERIFICAR"], XC.ver), regra(["FALHA", "OFFLINE"], XC.falha), regra(["VAZIO"], XC.vazio)] });
+          ws.addConditionalFormatting({ ref, rules: [regra(["ONLINE", "OPERANDO"], XC.ok), regra(["FALHA"], XC.ver), regra(["OFFLINE"], XC.falha), regra(["VAZIO"], XC.vazio)] });
         };
 
         /* ---------- Painel ---------- */
@@ -3097,7 +3105,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const quadros = [
           ["Dispositivos", { formula: `C${TL}`, result: r.total }, "F2F2F2", XC.grafite, "0"],
           ["Disponibilidade", { formula: `O${TL}`, result: base ? ok / base : 0 }, "E2F0D9", "006100", "0.0%"],
-          ["Falha / Offline", { formula: `I${TL}`, result: (r.status.FALHA || 0) + (r.status.OFFLINE || 0) }, "FDE9E7", "9C0006", "0"],
+          ["Falha / Offline", { formula: `G${TL}&" / "&I${TL}`, result: `${r.status.FALHA || 0} / ${r.status.OFFLINE || 0}` }, "FDE9E7", "9C0006", "@"],
           ["Senhas a confirmar", { formula: `K${TL}`, result: r.senhasPend }, "FDE9E7", "9C0006", "0"],
           ["Pendências em aberto", { formula: `M${TL}`, result: pendAb }, "FCE4D6", "843C0C", "0"],
           ["Pendências atrasadas", { formula: `COUNTIFS(${PR("sit")},"EM ABERTO",${PR("noPrazo")},"ATRASADA")`, result: calcP.filter((x) => x.p.aberta && x.noPrazo === "ATRASADA").length }, "FDE9E7", "9C0006", "0"],
@@ -3114,8 +3122,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           return {
             s,
             ok: c((i) => ["ONLINE", "OPERANDO"].includes(i.status)),
-            ver: c((i) => i.status === "VERIFICAR"),
-            falha: c((i) => ["FALHA", "OFFLINE"].includes(i.status)),
+            ver: c((i) => i.status === "FALHA"), // amarelo: falha
+            falha: c((i) => i.status === "OFFLINE"), // vermelho: offline
             vazio: c((i) => i.status === "VAZIO"),
             total: l.length,
             conf: c((i) => i.verificado && temSenha(credDe(s, i, S.aces))),
@@ -3143,11 +3151,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const topTipos = Object.entries(tiposCont).sort((a, b) => b[1] - a[1]).slice(0, 10);
         const alTipos = [...new Set(alAt.map((a) => a.tipo))];
         const imgs = [
-          grafico({ titulo: "Status por sistema (% dos dispositivos)", horiz: true, pct: true, cats: porSis.map((x) => x.s), series: [{ nome: "Online / Operando", cor: GCOR.ok, vals: porSis.map((x) => x.ok) }, { nome: "Verificar", cor: GCOR.ver, vals: porSis.map((x) => x.ver) }, { nome: "Falha / Offline", cor: GCOR.falha, vals: porSis.map((x) => x.falha) }, { nome: "Vazio", cor: GCOR.vazio, vals: porSis.map((x) => x.vazio) }] }),
+          grafico({ titulo: "Status por sistema (% dos dispositivos)", horiz: true, pct: true, cats: porSis.map((x) => x.s), series: [{ nome: "Online / Operando", cor: GCOR.ok, vals: porSis.map((x) => x.ok) }, { nome: "Falha", cor: GCOR.ver, vals: porSis.map((x) => x.ver) }, { nome: "Offline", cor: GCOR.falha, vals: porSis.map((x) => x.falha) }, { nome: "Vazio", cor: GCOR.vazio, vals: porSis.map((x) => x.vazio) }] }),
           rosca("Situação dos dispositivos", [
             { nome: "Online / Operando", cor: GCOR.ok, val: ok },
-            { nome: "Verificar", cor: GCOR.ver, val: r.status.VERIFICAR || 0 },
-            { nome: "Falha / Offline", cor: GCOR.falha, val: (r.status.FALHA || 0) + (r.status.OFFLINE || 0) },
+            { nome: "Falha", cor: GCOR.ver, val: r.status.FALHA || 0 },
+            { nome: "Offline", cor: GCOR.falha, val: r.status.OFFLINE || 0 },
             { nome: "Vazio / sem status", cor: GCOR.vazio, val: (r.status.VAZIO || 0) + (r.status["-"] || 0) },
           ]),
           grafico({ titulo: "Senhas confirmadas x a confirmar", horiz: true, empilhado: true, rotulos: true, cats: porSis.filter((x) => x.conf + x.aconf).map((x) => x.s), series: [{ nome: "Confirmadas", cor: GCOR.ok, vals: porSis.filter((x) => x.conf + x.aconf).map((x) => x.conf) }, { nome: "A confirmar", cor: GCOR.falha, vals: porSis.filter((x) => x.conf + x.aconf).map((x) => x.aconf) }] }),
@@ -3163,7 +3171,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         });
         // resumo por sistema: tudo por fórmula, olhando as abas de cada sistema e a aba Pendências
         faixa(P, R, 1, 16, "RESUMO POR SISTEMA", 11, 22);
-        const hres = ["Sistema", "Total", "Online / Operando", "Verificar", "Falha / Offline", "Senhas a confirmar", "Pendências em aberto", "Disponibilidade"];
+        const hres = ["Sistema", "Total", "Online / Operando", "Falha", "Offline", "Senhas a confirmar", "Pendências em aberto", "Disponibilidade"];
         hres.forEach((h, k) => {
           P.mergeCells(R + 1, 1 + 2 * k, R + 1, 2 + 2 * k);
           cab(P, R + 1, 1 + 2 * k, h);
@@ -3182,8 +3190,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 null,
                 `COUNTA(${aba(s_)}!$A$10:$A$${FIMF})`,
                 `COUNTIF(${faixaSt},"ONLINE")+COUNTIF(${faixaSt},"OPERANDO")`,
-                `COUNTIF(${faixaSt},"VERIFICAR")`,
-                `COUNTIF(${faixaSt},"FALHA")+COUNTIF(${faixaSt},"OFFLINE")`,
+                `COUNTIF(${faixaSt},"FALHA")`,
+                `COUNTIF(${faixaSt},"OFFLINE")`,
                 `COUNTIF(${aba(s_)}!$${letra(s_, "sconf")}$10:$${letra(s_, "sconf")}$${FIMF},"A CONFIRMAR")`,
                 `COUNTIFS(${PR("sis")},"${s_}",${PR("sit")},"EM ABERTO")`,
                 `IFERROR(E${lin}/(E${lin}+G${lin}+I${lin}),0)`,
@@ -3201,7 +3209,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             }
           });
         });
-        P.getCell(R + 4 + porSis.length, 1).value = "Disponibilidade = Online/Operando ÷ (online + verificar + falha). Quadros e resumo são fórmulas: mudam se você alterar status ou pendências nas abas. Os gráficos são imagens com a situação do momento da exportação.";
+        P.getCell(R + 4 + porSis.length, 1).value = "Disponibilidade = Online/Operando ÷ (online + falha + offline). Quadros e resumo são fórmulas: mudam se você alterar status ou pendências nas abas. Os gráficos são imagens com a situação do momento da exportação.";
         P.getCell(R + 4 + porSis.length, 1).font = xFont({ size: 9, italic: true, color: "7F7F7F" });
 
         /* ---------- abas por sistema ---------- */
@@ -3228,8 +3236,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const cnt = (f) => itens.filter(f).length;
           quadro(W, 6, 1, "Dispositivos", { formula: `COUNTA(A10:A${fim})`, result: itens.length }, "F2F2F2", XC.grafite, "0");
           quadro(W, 6, 2, "Online / Operando", { formula: `COUNTIF(${st}10:${st}${fim},"ONLINE")+COUNTIF(${st}10:${st}${fim},"OPERANDO")`, result: cnt((i) => ["ONLINE", "OPERANDO"].includes(i.status)) }, ...XC.ok, "0");
-          quadro(W, 6, 3, "Verificar", { formula: `COUNTIF(${st}10:${st}${fim},"VERIFICAR")`, result: cnt((i) => i.status === "VERIFICAR") }, ...XC.ver, "0");
-          quadro(W, 6, 4, "Falha / Offline", { formula: `COUNTIF(${st}10:${st}${fim},"FALHA")+COUNTIF(${st}10:${st}${fim},"OFFLINE")`, result: cnt((i) => ["FALHA", "OFFLINE"].includes(i.status)) }, ...XC.falha, "0");
+          quadro(W, 6, 3, "Falha", { formula: `COUNTIF(${st}10:${st}${fim},"FALHA")`, result: cnt((i) => i.status === "FALHA") }, ...XC.ver, "0");
+          quadro(W, 6, 4, "Offline", { formula: `COUNTIF(${st}10:${st}${fim},"OFFLINE")`, result: cnt((i) => i.status === "OFFLINE") }, ...XC.falha, "0");
           quadro(W, 6, 5, "Vazio", { formula: `COUNTIF(${st}10:${st}${fim},"VAZIO")`, result: cnt((i) => i.status === "VAZIO") }, ...XC.vazio, "0");
           const sc = colL(ci.sconf),
             pdc = colL(ci.pend);

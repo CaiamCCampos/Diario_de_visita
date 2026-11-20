@@ -2052,7 +2052,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         ...((c && c.eqs) || []).map((e) => [e.id, `${tp(e.tipo).sis} · ${tp(e.tipo).nome} · ${nmEq(e)}`]),
       ];
       /* ---- Inventário (inventario.html): a pendência escolhe o dispositivo e pode mudar a situação dele ---- */
-      const SIT_DISP = ["ONLINE", "OPERANDO", "VERIFICAR", "FALHA", "OFFLINE"];
+      const SIT_DISP = ["ONLINE", "OPERANDO", "FALHA", "OFFLINE"];
       const semAc = (x) => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       S.invCli = {}; // clienteId -> { itens: [...] } (dispositivos do inventário, carregados quando precisa)
       function invDoCliente(c) {
@@ -2171,7 +2171,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         return p;
       }
       const SIT_OK = ["ONLINE", "OPERANDO"];
-      // ao concluir: se o dispositivo ficou como OFFLINE/FALHA/VERIFICAR, pergunta se volta para ONLINE
+      // ao concluir: se o dispositivo ficou como OFFLINE/FALHA, pergunta se volta para ONLINE
       function perguntaOnline(p, cliId) {
         if (!p || !p.dispId) return false;
         const ci = S.invCli[cliId || p.clienteId],
