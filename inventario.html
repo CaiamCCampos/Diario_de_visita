@@ -14,6 +14,8 @@
     <link rel="icon" type="image/png" href="icon-192.png" />
     <!-- SheetJS: lê a planilha antiga (.xlsx) no navegador e gera o Excel exportado -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- ExcelJS: monta a planilha exportada no modelo profissional (cores, painel, abas por sistema) -->
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="config.js"></script>
     <style>
       :root {
@@ -1352,6 +1354,37 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       }
       const alertaAtivo = (a) => a.sit !== "OK";
 
+      /* ---- pendências do diário ligadas aos dispositivos ----
+         por enquanto o diário guarda o tipo do catálogo (tipoId); o dispositivo exato (dispId) entra na próxima etapa.
+         Até lá, liga pela TAG citada no título/problema da pendência. */
+      const pendSis = (p) => {
+        const t = tipoCat(p.tipoId);
+        const sg = (t && t.sis) || p.sis || "";
+        return Object.entries(SIS_CAT).find(([, v]) => v === sg)?.[0] || sg;
+      };
+      function pendDisp(p) {
+        if (p.dispId) return [p.dispId];
+        const texto = semAcento([p.titulo, p.problema, p.diag, p.texto].join(" ")).toUpperCase();
+        const ids = [];
+        for (const sis of Object.keys(S.inv))
+          for (const it of S.inv[sis].itens || []) {
+            const tg = semAcento(it.tag || "").toUpperCase().trim();
+            if (tg.length >= 4 && texto.includes(tg)) ids.push(it.id);
+          }
+        return ids.slice(0, 6);
+      }
+      // mapa dispositivo → pendências, refeito só quando as pendências ou o inventário mudam
+      let cachePend = { k: null, m: new Map() };
+      function mapaPend() {
+        const k = [S.pend, ...Object.values(S.inv).map((d) => `${d.id}:${d.atualizadoEm}:${(d.itens || []).length}`)];
+        if (cachePend.k && cachePend.k.length === k.length && cachePend.k.every((x, i) => x === k[i])) return cachePend.m;
+        const m = new Map();
+        (S.pend || []).forEach((p) => pendDisp(p).forEach((id) => (m.get(id) || m.set(id, []).get(id)).push(p)));
+        cachePend = { k, m };
+        return m;
+      }
+      const pendDoItem = (id) => mapaPend().get(id) || [];
+
       /* ---- ligação com o catálogo do diário ----
          catálogo (diário) = tipos de equipamento e perfis de atividades; o inventário só LÊ o catálogo.
          inventarioConfig/geral.mapa: "SISTEMA|TIPO DA PLANILHA" → id do tipo no catálogo (vale para todos os clientes)
@@ -1567,7 +1600,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           DB.listen("inventario", f, null, (a) => {
             S.inv = {};
             a.forEach((d) => (S.inv[d.sistema] = d));
-            if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas", "catalogo"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
+            if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas", "catalogo", "pendencias"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
             render();
           }),
           DB.listen("inventarioAcessos", f, null, (a) => {
@@ -1577,6 +1610,15 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           }),
           DB.listen("inventarioMeta", ehAdmin() ? { clienteId: id } : { clienteId: id, equipeId: S.me.equipeId }, null, (a) => {
             S.meta = a[0] || null;
+            render();
+          }),
+        );
+        // pendências do diário deste cliente (só leitura aqui; são criadas e concluídas no diário)
+        S.pend = [];
+        const eqCli = (cli && cli.equipeId) || (ehAdmin() ? "" : S.me.equipeId);
+        unsubCli.push(
+          DB.listen("pendencias", eqCli ? { clienteId: id, equipeId: eqCli } : { clienteId: id }, null, (a) => {
+            S.pend = a;
             render();
           }),
         );
@@ -1680,12 +1722,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const ok = (r.status.ONLINE || 0) + (r.status.OPERANDO || 0),
           base = r.total - (r.status.VAZIO || 0) - (r.status["-"] || 0),
           disp = base ? Math.round((ok / base) * 1000) / 10 : 0;
+        const nPendAb = (S.pend || []).filter((p) => p.aberta).length;
         const nSemCat = al.filter((a) => a.tipo === "Tipo sem catálogo" && alertaAtivo(a)).length;
         const abas = [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))];
-        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
-        const corpo = S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
+        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
+        const corpo = S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
         return `<div class="card cinl"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3>${esc(cli.unidade)}</h3><div class="cacts">${cli.mp ? `<span class="chip">${esc(cli.mp)}</span>` : ""}<span class="chip">v${(m && m.versao) || 1}</span>
-  <button class="b o s" data-a="exporta">Exportar Excel</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
+  ${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
   <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
   <div class="kpis"><div class="kpi"><div class="r">Dispositivos</div><div class="n">${r.total}</div></div><div class="kpi ok"><div class="r">Disponibilidade</div><div class="n">${String(disp).replace(".", ",")}%</div></div><div class="kpi red"><div class="r">Falha / Offline</div><div class="n">${(r.status.FALHA || 0) + (r.status.OFFLINE || 0)}</div></div><div class="kpi am"><div class="r">Verificar</div><div class="n">${r.status.VERIFICAR || 0}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${r.senhasPend}</div></div><div class="kpi ok"><div class="r">Senhas confirmadas</div><div class="n">${r.verificados}<span class="sm"> de ${r.comSenha}</span></div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${alAt}</div></div></div>
   ${tabs}<div class="aux">${corpo}</div>`;
@@ -1726,6 +1769,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                   v += tc ? `<div class="sm">→ ${esc(tc.nome)}</div>` : '<div class="sm rd">sem catálogo</div>';
                 }
                 if (k === "id" && comAl.has(it.id)) v += '<span class="tag-al">alerta</span>';
+                if (k === "id" && pendDoItem(it.id).some((p) => p.aberta)) v += '<span class="tag-al" style="background:#fde3e3;color:#9c0006">pendência</span>';
                 if (k === "ip" || k === "id") v = `<span class="mono">${v}</span>`;
                 const cls = [k === "tag" ? "c-tag" : "", !it[k] && k !== "status" ? "vazio" : ""].filter(Boolean).join(" ");
                 return `<td data-l="${esc(ROT[k])}"${cls ? ` class="${cls}"` : ""}>${v}</td>`;
@@ -1770,7 +1814,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           .join("");
         return `<div class="sm"><b>${esc(it.id)}</b>${leg[sis + "|" + it.tipo] ? " · " + esc(leg[sis + "|" + it.tipo]) : ""}${it.origem ? " · veio de " + esc(it.origem) : ""}</div>
   <div class="g">${camposSis(sis).map(campo).join("")}</div>
-  <div class="g">${acessos}</div>${vItemCat(sis, it)}${vItemDetalhes(sis, it)}
+  <div class="g">${acessos}</div>${vItemCat(sis, it)}${vItemDetalhes(sis, it)}${vItemPend(it)}
   <label>Observação</label><textarea id="e_obs" rows="2"${ed ? "" : " readonly"}>${esc(it.obs || "")}</textarea>
   <div class="sm" style="margin-top:6px">${it.verificado ? `<span class="ver">Senha confirmada em <b>${dh(it.verificado)}</b>${it.verificadoPor ? " por " + esc(it.verificadoPor) : ""}</span>` : temSenha(credDe(sis, it, S.aces)) ? '<span class="st FALHA">Senha a confirmar</span>' : "Sem login/senha cadastrados."}${it.alteradoEm ? ` · última alteração em ${esc(it.alteradoEm)}${it.alteradoPor ? " por " + esc(it.alteradoPor) : ""}` : ""}</div>
   <div>${ed || edA ? `<button class="b" data-a="salvaItem">Salvar alterações</button>` : ""}${pode("inv.confirmar") ? `<button class="b o" data-a="confirma">Senha OK (confirmar agora)</button>` : ""}${pode("inv.excluir") ? `<button class="b o" data-a="excluiItem">Excluir dispositivo</button>` : ""}<button class="b o" data-a="fechaItem">Fechar</button></div>`;
@@ -1795,6 +1839,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             }</div>`
           : "";
         return `<div class="cent"><b class="rd">Catálogo</b><div class="sm" style="margin:4px 0">${info}</div>${atv.length ? `<details><summary>Atividades da preventiva (${atv.length})</summary>${atv.map((a) => `<div class="sm">· ${esc(a)}</div>`).join("")}</details>` : ""}${sel}</div>`;
+      }
+      function vItemPend(it) {
+        const l = pendDoItem(it.id);
+        if (!l.length) return "";
+        return `<div class="cent"><b class="rd">Pendências do diário</b>${l
+          .map((p) => `<div class="sm" style="margin-top:4px">${p.aberta ? '<span class="st FALHA">em aberto</span>' : '<span class="st ONLINE">concluída</span>'} <b>${esc(p.titulo || "(sem título)")}</b> · aberta em ${bd(p.criada)}${!p.aberta && p.concluidaEm ? " · concluída em " + bd(p.concluidaEm) : ""}</div>`)
+          .join("")}</div>`;
       }
       function vItemDetalhes(sis, it) {
         const det = it.detalhes || [],
@@ -1914,6 +1965,30 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         }).length;
         return `<div class="note" style="background:#f6f6f7">No cliente, confira se o login e a senha da planilha funcionam no equipamento. Se funcionar, marque e clique em <b>Senha OK</b>: fica registrado o dia, a hora e quem confirmou. Se a senha for outra, toque em <b>abrir</b>, corrija e clique em <b>Senha OK</b> na ficha do dispositivo.</div>
   ${podeC ? `<div class="top" style="position:sticky;top:-10px;background:#fff;z-index:2;padding:8px 0;border-bottom:1px solid var(--l)"><span class="sm">${nSel} selecionado${nSel === 1 ? "" : "s"} de ${total}</span><button class="b" data-a="confirmaSel" style="margin:0"${nSel ? "" : " disabled"}>Senha OK nos selecionados</button></div>` : ""}${blocos}`;
+      }
+
+      function vPend() {
+        const L = (S.pend || []).slice(),
+          f = S.fPend || "aberta";
+        const ab = L.filter((p) => p.aberta),
+          co = L.filter((p) => !p.aberta);
+        const dias = (a, b) => (a && b ? Math.round((new Date(b) - new Date(a)) / 864e5) : "");
+        const tm = co.map((p) => dias(p.criada, p.concluidaEm)).filter((x) => x !== "");
+        const lista = (f === "aberta" ? ab : f === "concluida" ? co : L).sort((a, b) =>
+          f === "concluida" ? String(b.concluidaEm || "").localeCompare(String(a.concluidaEm || "")) : String(b.criada || "").localeCompare(String(a.criada || "")),
+        );
+        const card = (p) => {
+          const t = tipoCat(p.tipoId),
+            ids = pendDisp(p);
+          return `<div class="al ${p.aberta ? "NOK" : "OK"}" style="opacity:1"><div class="t"><b>${esc(p.titulo || "(sem título)")}</b><span class="chip ${p.aberta ? "red" : "ok"}">${p.aberta ? "Em aberto há " + dias(p.criada, hoje()) + " dia(s)" : "Concluída " + bd(p.concluidaEm)}</span></div>
+  <div class="sm">${pendSis(p) ? `<b>${esc(pendSis(p))}</b>` : ""}${t ? " · " + esc(t.nome) : ""}${p.status ? " · " + esc(p.status) : ""} · aberta por ${esc(p.criadaPorNome || "(sem registro)")} em ${bd(p.criada)}${!p.aberta && p.concluidaEm ? ` · concluída em ${bd(p.concluidaEm)}${p.concluidaPorNome ? " por " + esc(p.concluidaPorNome) : ""}` : ""}</div>
+  ${p.problema ? `<div class="sm" style="margin-top:4px">${esc(p.problema)}</div>` : ""}${!p.aberta && p.solucao ? `<div class="sm" style="margin-top:4px"><b>Solução:</b> ${esc(p.solucao)}</div>` : ""}
+  ${ids.length ? `<div class="ids sm">${p.dispId ? "Dispositivo" : "TAG citada"}: ${ids.map((id) => `<a data-a="vaiItem" data-id="${esc(id)}">${esc(id)}</a>`).join("")}</div>` : '<div class="sm" style="color:var(--d)">Sem dispositivo ligado (a ligação direta vem quando o diário passar a escolher o dispositivo do inventário).</div>'}</div>`;
+        };
+        return `<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
+  <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Elas são criadas e concluídas no diário; aqui você acompanha e vê o dispositivo ligado.</div>
+  <div class="filtros"><div><label>Mostrar</label><select data-f="fPend"><option value="aberta"${f === "aberta" ? " selected" : ""}>Em aberto</option><option value="concluida"${f === "concluida" ? " selected" : ""}>Concluídas</option><option value="todas"${f === "todas" ? " selected" : ""}>Todas</option></select></div></div>
+  ${lista.map(card).join("") || '<div class="card"><p class="sm">Nenhuma pendência.</p></div>'}`;
       }
 
       function vAlertas(al) {
@@ -2376,7 +2451,16 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           }
         },
         exporta() {
-          exportaExcel();
+          exportaCompleto(false).catch((e) => {
+            console.error(e);
+            toast("Não consegui gerar a planilha: " + e.message);
+          });
+        },
+        exportaSem() {
+          exportaCompleto(true).catch((e) => {
+            console.error(e);
+            toast("Não consegui gerar a planilha: " + e.message);
+          });
         },
       };
 
@@ -2444,36 +2528,6 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           console.error(e);
           toast(e.code === "permission-denied" ? "Sem permissão para alterar o Catálogo (regras do Firestore)." : "Não consegui criar: " + (e.code || e.message));
         }
-      }
-
-      /* exportação simples para Excel (uma aba por sistema). A planilha completa com painel vem na próxima etapa. */
-      function exportaExcel() {
-        if (typeof XLSX === "undefined") return toast("A biblioteca do Excel não carregou. Confira a internet.");
-        const cli = cliNome(S.cliId),
-          leg = (S.meta && S.meta.legenda) || {},
-          senhas = pode("inv.acesso");
-        const wb = XLSX.utils.book_new();
-        for (const sis of [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))]) {
-          const ac = (S.aces[sis] || {}).acessos || {};
-          const cols = ["id", "tipo", "modelo", "fabricante", "tag", "ip", "pav", ...(EXTRAS[sis] || []), "status", ...(senhas ? ["login", "senha", ...(temAcesso2(sis) ? ["login2", "senha2"] : [])] : []), "obs"];
-          const linhas = (S.inv[sis].itens || []).map((it) => {
-            const o = {};
-            cols.forEach((k) => {
-              o[rotSis(sis, k)] = ACESSO.includes(k) ? (ac[it.id] || {})[k] || "" : it[k] || "";
-              if (k === "tipo" && leg[sis + "|" + it.tipo]) o["Descrição do tipo"] = leg[sis + "|" + it.tipo];
-            });
-            o["Senha confirmada em"] = dh(it.verificado) || (senhaPend(sis, it, S.aces) ? "A CONFIRMAR" : "");
-            o["Confirmado por"] = it.verificadoPor || "";
-            return o;
-          });
-          const ws = XLSX.utils.json_to_sheet(linhas);
-          ws["!cols"] = Object.keys(linhas[0] || {}).map((k) => ({ wch: Math.min(40, Math.max(8, k.length + 2, ...linhas.map((l) => String(l[k] || "").length + 1))) }));
-          XLSX.utils.book_append_sheet(wb, ws, sis.slice(0, 31));
-        }
-        const al = calcAlertas(S.inv, S.meta).map((a) => ({ Sistema: a.sis, Alerta: a.tipo, "TAG / Item": a.tag, Detalhe: a.texto, Dispositivos: a.ids.join(", "), "Situação": a.sit, Justificativa: a.just, "Conferido por": a.por, Data: a.data }));
-        if (al.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(al), "Alertas");
-        XLSX.writeFile(wb, `Inventario_${semAcento(cli).replace(/[^A-Za-z0-9]+/g, "_")}${senhas ? "" : "_SEM_SENHAS"}_${hoje()}.xlsx`);
-        audita("exportou inventário", "inventarioMeta", S.cliId, `${cli}${senhas ? " (com senhas)" : ""}`);
       }
 
       /* leitura do arquivo escolhido na importação */
@@ -2571,6 +2625,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         }
         if (t.id === "impArq" && t.files && t.files[0]) return leArquivo(t.files[0]);
         const f = t.dataset && t.dataset.f;
+        if (f === "fPend") {
+          S.fPend = t.value;
+          return render();
+        }
         if (f === "fPav" || f === "fSt") {
           S[f] = t.value;
           S.lim = 200;
@@ -2598,6 +2656,756 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           return render();
         }
       });
+
+      /* ==================================================================
+   11. EXPORTAÇÃO NO MODELO PROFISSIONAL (ExcelJS)
+   Painel com gráficos (desenhados como imagem), uma aba por sistema com cores de status,
+   pendências do diário, pavimentos, alertas, ligação com o catálogo, legenda e detalhes.
+   Versão completa (com senhas) para quem pode ver senhas; versão sem senhas para todos.
+   ================================================================== */
+      const XC = {
+        verm: "E42326",
+        cinza: "6D6E72",
+        grafite: "2E2F33",
+        acesso: "B71C1F",
+        cfg: "4A4B50",
+        zebra: "F6F6F7",
+        amarelo: "FFF8E1",
+        ok: ["C6EFCE", "006100"],
+        ver: ["FFEB9C", "7F5F00"],
+        falha: ["FFC7CE", "9C0006"],
+        vazio: ["EDEDED", "595959"],
+      };
+      const GCOR = { ok: "#0CA30C", ver: "#FAB219", falha: "#D03B3B", vazio: "#B4B2A9", azul: "#2F6EBA", laranja: "#ED7D31" };
+      const argb = (h) => "FF" + h.replace("#", "");
+      const xFill = (h) => ({ type: "pattern", pattern: "solid", fgColor: { argb: argb(h) } });
+      const xFont = (o = {}) => ({ name: "Arial", size: o.size || 10, bold: !!o.bold, italic: !!o.italic, color: { argb: argb(o.color || "000000") } });
+      const xBorda = { top: { style: "thin", color: { argb: "FFD9D9D9" } }, left: { style: "thin", color: { argb: "FFD9D9D9" } }, bottom: { style: "thin", color: { argb: "FFD9D9D9" } }, right: { style: "thin", color: { argb: "FFD9D9D9" } } };
+      const colL = (n) => {
+        let s = "";
+        while (n > 0) {
+          const m = (n - 1) % 26;
+          s = String.fromCharCode(65 + m) + s;
+          n = Math.floor((n - 1) / 26);
+        }
+        return s;
+      };
+
+      /* ---- gráficos desenhados num canvas (viram imagem no Excel) ---- */
+      function grafico(o) {
+        const W = o.w || 640,
+          H = o.h || 300,
+          cv = document.createElement("canvas");
+        cv.width = W * 2;
+        cv.height = H * 2;
+        const g = cv.getContext("2d");
+        g.scale(2, 2);
+        g.fillStyle = "#fff";
+        g.fillRect(0, 0, W, H);
+        g.strokeStyle = "#D9D9D9";
+        g.strokeRect(0.5, 0.5, W - 1, H - 1);
+        g.fillStyle = "#262626";
+        g.font = "bold 14px Arial";
+        g.textAlign = "center";
+        g.fillText(o.titulo, W / 2, 24);
+        const cats = o.cats,
+          series = o.series.filter((s) => s.vals.length);
+        const temLeg = series.length > 1;
+        if (temLeg) {
+          g.font = "11px Arial";
+          const itens = series.map((s) => [s, g.measureText(s.nome).width + 26]);
+          let x = W / 2 - itens.reduce((a, b) => a + b[1], 0) / 2;
+          itens.forEach(([s, w]) => {
+            g.fillStyle = s.cor;
+            g.fillRect(x, H - 19, 10, 10);
+            g.fillStyle = "#404040";
+            g.textAlign = "left";
+            g.fillText(s.nome, x + 14, H - 10);
+            x += w;
+          });
+        }
+        if (!cats.length) {
+          g.fillStyle = "#7F7F7F";
+          g.font = "12px Arial";
+          g.textAlign = "center";
+          g.fillText("Sem dados", W / 2, H / 2);
+          return cv.toDataURL("image/png").split(",")[1];
+        }
+        const tot = cats.map((_, i) => series.reduce((a, s) => a + (s.vals[i] || 0), 0));
+        const bruto = Math.max(1, ...(o.empilhado ? tot : series.flatMap((s) => s.vals)));
+        const passo = Math.max(1, Math.ceil(bruto / 4)); // marcas inteiras no eixo (0, 1, 2… ou 0, 5, 10…)
+        const max = o.pct ? 1 : passo * 4;
+        const val = (s, i) => (o.pct ? (tot[i] ? (s.vals[i] || 0) / tot[i] : 0) : s.vals[i] || 0);
+        const top = 40,
+          bot = temLeg ? 32 : 14;
+        g.font = "11px Arial";
+        if (o.horiz) {
+          const lw = Math.min(210, Math.max(...cats.map((c) => g.measureText(c).width)) + 12);
+          const L0 = lw + 8,
+            R0 = W - 36,
+            pw = R0 - L0,
+            ph = H - top - bot,
+            band = ph / cats.length,
+            bh = Math.min(26, band * 0.66);
+          g.strokeStyle = "#EDEDED";
+          g.fillStyle = "#7F7F7F";
+          g.textAlign = "center";
+          for (let k = 0; k <= 4; k++) {
+            const x = L0 + (pw * k) / 4;
+            g.beginPath();
+            g.moveTo(x, top);
+            g.lineTo(x, top + ph);
+            g.stroke();
+            if (o.pct) g.fillText(k * 25 + "%", x, top - 4);
+          }
+          cats.forEach((c, i) => {
+            const y = top + i * band + (band - bh) / 2;
+            g.fillStyle = "#404040";
+            g.textAlign = "right";
+            let t = c;
+            while (g.measureText(t).width > lw - 6 && t.length > 4) t = t.slice(0, -2);
+            g.fillText(t === c ? c : t + "…", L0 - 6, y + bh / 2 + 4);
+            let x = L0;
+            const gw = o.empilhado || o.pct ? bh : bh / series.length;
+            series.forEach((s, j) => {
+              const w = (val(s, i) / max) * pw;
+              g.fillStyle = s.cor;
+              if (o.empilhado || o.pct) {
+                g.fillRect(x, y, w, bh);
+                if (w > 0) {
+                  g.fillStyle = "#fff";
+                  g.fillRect(x + w - 1, y, 1.5, bh);
+                }
+                x += w;
+              } else {
+                g.fillRect(L0, y + j * gw, w, gw - 1);
+                if (o.rotulos && s.vals[i]) {
+                  g.fillStyle = "#262626";
+                  g.textAlign = "left";
+                  g.font = "bold 11px Arial";
+                  g.fillText(String(s.vals[i]), L0 + w + 4, y + j * gw + gw / 2 + 4);
+                  g.font = "11px Arial";
+                }
+              }
+            });
+            if ((o.empilhado && !o.pct) && o.rotulos && tot[i]) {
+              g.fillStyle = "#262626";
+              g.textAlign = "left";
+              g.font = "bold 11px Arial";
+              g.fillText(String(tot[i]), x + 4, y + bh / 2 + 4);
+              g.font = "11px Arial";
+            }
+          });
+        } else {
+          const L0 = 40,
+            R0 = W - 14,
+            pw = R0 - L0,
+            rot = cats.length > 10,
+            ph = H - top - bot - (rot ? 46 : 18),
+            band = pw / cats.length,
+            bw = Math.min(46, band * 0.66);
+          g.strokeStyle = "#EDEDED";
+          g.fillStyle = "#7F7F7F";
+          g.textAlign = "right";
+          for (let k = 0; k <= 4; k++) {
+            const y = top + ph - (ph * k) / 4;
+            g.beginPath();
+            g.moveTo(L0, y);
+            g.lineTo(R0, y);
+            g.stroke();
+            g.fillText(String(passo * k), L0 - 5, y + 4);
+          }
+          cats.forEach((c, i) => {
+            const x0 = L0 + i * band + (band - bw) / 2,
+              gw = o.empilhado ? bw : bw / series.length;
+            let yb = top + ph;
+            series.forEach((s, j) => {
+              const h = (val(s, i) / max) * ph;
+              g.fillStyle = s.cor;
+              if (o.empilhado) {
+                g.fillRect(x0, yb - h, bw, h);
+                yb -= h;
+              } else {
+                g.fillRect(x0 + j * gw, top + ph - h, gw - 2, h);
+                if (o.rotulos && s.vals[i]) {
+                  g.fillStyle = "#262626";
+                  g.textAlign = "center";
+                  g.font = "bold 10px Arial";
+                  g.fillText(String(s.vals[i]), x0 + j * gw + gw / 2 - 1, top + ph - h - 3);
+                  g.font = "11px Arial";
+                }
+              }
+            });
+            g.fillStyle = "#404040";
+            g.font = rot ? "9px Arial" : "11px Arial";
+            if (rot) {
+              g.save();
+              g.translate(x0 + bw / 2, top + ph + 8);
+              g.rotate(-Math.PI / 4);
+              g.textAlign = "right";
+              g.fillText(c, 0, 0);
+              g.restore();
+            } else {
+              g.textAlign = "center";
+              g.fillText(c, x0 + bw / 2, top + ph + 14);
+            }
+            g.font = "11px Arial";
+          });
+        }
+        return cv.toDataURL("image/png").split(",")[1];
+      }
+      function rosca(titulo, partes, W = 640, H = 300) {
+        const cv = document.createElement("canvas");
+        cv.width = W * 2;
+        cv.height = H * 2;
+        const g = cv.getContext("2d");
+        g.scale(2, 2);
+        g.fillStyle = "#fff";
+        g.fillRect(0, 0, W, H);
+        g.strokeStyle = "#D9D9D9";
+        g.strokeRect(0.5, 0.5, W - 1, H - 1);
+        g.fillStyle = "#262626";
+        g.font = "bold 14px Arial";
+        g.textAlign = "center";
+        g.fillText(titulo, W / 2, 24);
+        const tot = partes.reduce((a, p) => a + p.val, 0),
+          cx = W / 2 - 90,
+          cy = 160,
+          r = 100;
+        let ang = -Math.PI / 2;
+        partes.forEach((p) => {
+          if (!tot || !p.val) return;
+          const a = (p.val / tot) * Math.PI * 2;
+          g.beginPath();
+          g.moveTo(cx, cy);
+          g.arc(cx, cy, r, ang, ang + a);
+          g.closePath();
+          g.fillStyle = p.cor;
+          g.fill();
+          g.strokeStyle = "#fff";
+          g.lineWidth = 2;
+          g.stroke();
+          ang += a;
+        });
+        g.beginPath();
+        g.arc(cx, cy, r * 0.6, 0, Math.PI * 2);
+        g.fillStyle = "#fff";
+        g.fill();
+        g.fillStyle = "#262626";
+        g.font = "bold 20px Arial";
+        g.fillText(String(tot), cx, cy + 4);
+        g.font = "11px Arial";
+        g.fillStyle = "#7F7F7F";
+        g.fillText("dispositivos", cx, cy + 20);
+        let y = 110;
+        partes.forEach((p) => {
+          g.fillStyle = p.cor;
+          g.fillRect(cx + 140, y - 10, 12, 12);
+          g.fillStyle = "#262626";
+          g.textAlign = "left";
+          g.font = "12px Arial";
+          g.fillText(`${p.nome}: ${p.val} (${tot ? Math.round((p.val / tot) * 100) : 0}%)`, cx + 158, y);
+          y += 24;
+        });
+        return cv.toDataURL("image/png").split(",")[1];
+      }
+
+      async function exportaCompleto(semSenhas) {
+        if (typeof ExcelJS === "undefined") return toast("A biblioteca do Excel não carregou. Confira a internet.");
+        toast("Montando a planilha…");
+        const cli = S.clientes.find((c) => c.id === S.cliId) || { unidade: cliNome(S.cliId) },
+          nome = cli.unidade || "Cliente",
+          m = S.meta || {},
+          leg = m.legenda || {},
+          hj = bd(hoje());
+        const sists = [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))];
+        const al = calcAlertas(S.inv, m),
+          alAt = al.filter(alertaAtivo),
+          r = resumo(S.inv, m, S.aces);
+        const pend = S.pend || [];
+        const wb = new ExcelJS.Workbook();
+        wb.creator = "Diário Técnico · Controller BMS";
+        wb.created = new Date();
+        wb.calcProperties.fullCalcOnLoad = true;
+        let logoId = null;
+        try {
+          const b = await (await fetch("logo.png")).arrayBuffer();
+          let bin = "";
+          new Uint8Array(b).forEach((x) => (bin += String.fromCharCode(x)));
+          logoId = wb.addImage({ base64: btoa(bin), extension: "png" });
+        } catch (e) {}
+        const aviso = semSenhas ? "Versão sem senhas" : "CONFIDENCIAL — contém senhas de acesso";
+        const hf = {
+          oddHeader: `&L&"Arial,Bold"&9&K${XC.verm}CONTROLLER BMS&C&"Arial,Bold"&9${nome.replace(/&/g, "&&")}&R&"Arial"&9&A`,
+          oddFooter: `&L&"Arial,Bold"&8&K${semSenhas ? XC.cinza : XC.verm}${aviso}&C&"Arial"&8Página &P de &N&R&"Arial"&8Gerado em ${hj}`,
+        };
+        const nova = (n, o = {}) =>
+          wb.addWorksheet(n.slice(0, 31), {
+            views: [{ showGridLines: false, ...(o.frz ? { state: "frozen", ySplit: o.frz } : {}) }],
+            pageSetup: { paperSize: 9, orientation: o.retrato ? "portrait" : "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: o.umaPag ? 1 : 0, horizontalCentered: true, margins: { left: 0.4, right: 0.4, top: 0.6, bottom: 0.6, header: 0.25, footer: 0.25 } },
+            headerFooter: hf,
+          });
+        const faixa = (ws, lin, c1, c2, txt_, size = 16, alt = 30) => {
+          ws.mergeCells(lin, c1, lin, c2);
+          const c = ws.getCell(lin, c1);
+          c.value = txt_;
+          c.font = xFont({ bold: true, size, color: "FFFFFF" });
+          c.alignment = { horizontal: "center", vertical: "middle" };
+          for (let k = c1; k <= c2; k++) {
+            ws.getCell(lin, k).fill = xFill(XC.grafite);
+            ws.getCell(lin, k).border = { bottom: { style: "thick", color: { argb: argb(XC.verm) } } };
+          }
+          ws.getRow(lin).height = alt;
+        };
+        const cab = (ws, lin, col, t, cor = XC.cinza) => {
+          const c = ws.getCell(lin, col);
+          c.value = t;
+          c.font = xFont({ bold: true, color: "FFFFFF" });
+          c.fill = xFill(cor);
+          c.border = xBorda;
+          c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        };
+        const quadro = (ws, lin, col, rot, valor, bg, fg, fmt, span = 1) => {
+          if (span > 1) {
+            ws.mergeCells(lin, col, lin, col + span - 1);
+            ws.mergeCells(lin + 1, col, lin + 1, col + span - 1);
+          }
+          const a = ws.getCell(lin, col),
+            b = ws.getCell(lin + 1, col);
+          a.value = rot;
+          a.font = xFont({ size: 9, color: "595959" });
+          a.alignment = { horizontal: "center", vertical: "bottom", wrapText: true };
+          b.value = valor;
+          b.font = xFont({ size: 18, bold: true, color: fg });
+          b.alignment = { horizontal: "center", vertical: "middle" };
+          if (fmt) b.numFmt = fmt;
+          for (let k = col; k < col + span; k++) {
+            ws.getCell(lin, k).fill = xFill(bg);
+            ws.getCell(lin + 1, k).fill = xFill(bg);
+            ws.getCell(lin, k).border = { top: { style: "thick", color: { argb: argb(fg) } } };
+          }
+        };
+        const statusCF = (ws, ref, prim) => {
+          const regra = (vals, [bg, fg]) => ({
+            type: "expression",
+            formulae: ["OR(" + vals.map((v) => `${prim}="${v}"`).join(",") + ")"],
+            style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: argb(bg) } }, font: { bold: true, color: { argb: argb(fg) } } },
+          });
+          ws.addConditionalFormatting({ ref, rules: [regra(["ONLINE", "OPERANDO"], XC.ok), regra(["VERIFICAR"], XC.ver), regra(["FALHA", "OFFLINE"], XC.falha), regra(["VAZIO"], XC.vazio)] });
+        };
+
+        /* ---------- Painel ---------- */
+        const P = nova("Painel", { retrato: true, umaPag: true });
+        for (let i = 1; i <= 16; i++) P.getColumn(i).width = 10.3;
+        if (logoId !== null) P.addImage(logoId, { tl: { col: 0, row: 0.2 }, ext: { width: 230, height: 31 } });
+        P.mergeCells("J2:P2");
+        P.getCell("J2").value = "INVENTÁRIO TÉCNICO DE DISPOSITIVOS";
+        P.getCell("J2").font = xFont({ bold: true, size: 12, color: XC.grafite });
+        P.getCell("J2").alignment = { horizontal: "right" };
+        P.mergeCells("J3:P3");
+        P.getCell("J3").value = `Versão v${m.versao || 1} · gerado em ${hj}${semSenhas ? " · sem senhas" : ""}`;
+        P.getCell("J3").font = xFont({ size: 9, color: XC.cinza });
+        P.getCell("J3").alignment = { horizontal: "right" };
+        faixa(P, 5, 1, 16, `${nome.toUpperCase()} | PAINEL DO INVENTÁRIO`, 18, 34);
+        const ficha = [
+          ["Cliente", nome, "MP", cli.mp || ""],
+          ["Equipe", eqNome(cli.equipeId), "Versão do inventário", "v" + (m.versao || 1)],
+          ["Gerado em", hj, "Arquivo de origem", m.origem || ""],
+          ["Atualizado em", m.atualizadoEm || "", "Atualizado por", m.atualizadoPor || ""],
+        ];
+        ficha.forEach(([a, b, c, d], k) => {
+          const lin = 7 + k;
+          P.mergeCells(lin, 1, lin, 2);
+          P.mergeCells(lin, 3, lin, 8);
+          P.mergeCells(lin, 9, lin, 10);
+          P.mergeCells(lin, 11, lin, 16);
+          [
+            [1, a, true],
+            [3, b, false],
+            [9, c, true],
+            [11, d, false],
+          ].forEach(([col, v, rot]) => {
+            const cel = P.getCell(lin, col);
+            cel.value = v;
+            cel.font = rot ? xFont({ bold: true, size: 9, color: XC.cinza }) : xFont({ bold: col === 3 && k === 0 });
+          });
+          for (let cc = 1; cc <= 16; cc++) P.getCell(lin, cc).border = { bottom: { style: "thin", color: { argb: "FFE3E3E3" } } };
+        });
+        const ok = (r.status.ONLINE || 0) + (r.status.OPERANDO || 0),
+          base = r.total - (r.status.VAZIO || 0) - (r.status["-"] || 0);
+        const pendAb = pend.filter((p) => p.aberta).length;
+        const quadros = [
+          ["Dispositivos", r.total, "F2F2F2", XC.grafite, "0"],
+          ["Disponibilidade", base ? ok / base : 0, "E2F0D9", "006100", "0.0%"],
+          ["Falha / Offline", (r.status.FALHA || 0) + (r.status.OFFLINE || 0), "FDE9E7", "9C0006", "0"],
+          ["Verificar", r.status.VERIFICAR || 0, "FFF4D6", "7F5F00", "0"],
+          ["Senhas a confirmar", r.senhasPend, "FDE9E7", "9C0006", "0"],
+          ["Senhas confirmadas", r.verificados, "E2F0D9", "006100", "0"],
+          ["Pendências em aberto", pendAb, "FCE4D6", "843C0C", "0"],
+          ["Alertas a conferir", alAt.length, "FCE4D6", "843C0C", "0"],
+        ];
+        quadros.forEach(([rot, v, bg, fg, fmt], k) => quadro(P, 12, 1 + 2 * k, rot, v, bg, fg, fmt, 2));
+        P.getRow(12).height = 26;
+        P.getRow(13).height = 34;
+        // dados dos gráficos
+        const porSis = sists.map((s) => {
+          const l = S.inv[s].itens || [];
+          const c = (f) => l.filter(f).length;
+          return {
+            s,
+            ok: c((i) => ["ONLINE", "OPERANDO"].includes(i.status)),
+            ver: c((i) => i.status === "VERIFICAR"),
+            falha: c((i) => ["FALHA", "OFFLINE"].includes(i.status)),
+            vazio: c((i) => i.status === "VAZIO"),
+            total: l.length,
+            conf: c((i) => i.verificado && temSenha(credDe(s, i, S.aces))),
+            aconf: c((i) => senhaPend(s, i, S.aces)),
+            pend: pend.filter((p) => p.aberta && pendSis(p) === s).length,
+          };
+        });
+        const meses = [];
+        for (let k = 5; k >= 0; k--) {
+          const d = new Date();
+          d.setDate(1);
+          d.setMonth(d.getMonth() - k);
+          const ym = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+          meses.push([d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }).replace(". de ", "/").replace(" de ", "/"), pend.filter((p) => String(p.criada || "").startsWith(ym)).length, pend.filter((p) => String(p.concluidaEm || "").startsWith(ym)).length]);
+        }
+        const pavCont = {};
+        sists.forEach((s) => (S.inv[s].itens || []).forEach((i) => i.pav && (pavCont[i.pav] = (pavCont[i.pav] || 0) + 1)));
+        const pavs = Object.keys(pavCont).sort(cmpPav);
+        const tiposCont = {};
+        sists.forEach((s) => (S.inv[s].itens || []).forEach((i) => {
+          const tc = tipoCat(tipoCatDe(s, i));
+          const k = `${s} · ${tc ? tc.nome : i.tipo}`;
+          tiposCont[k] = (tiposCont[k] || 0) + 1;
+        }));
+        const topTipos = Object.entries(tiposCont).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        const alTipos = [...new Set(alAt.map((a) => a.tipo))];
+        const imgs = [
+          grafico({ titulo: "Status por sistema (% dos dispositivos)", horiz: true, pct: true, cats: porSis.map((x) => x.s), series: [{ nome: "Online / Operando", cor: GCOR.ok, vals: porSis.map((x) => x.ok) }, { nome: "Verificar", cor: GCOR.ver, vals: porSis.map((x) => x.ver) }, { nome: "Falha / Offline", cor: GCOR.falha, vals: porSis.map((x) => x.falha) }, { nome: "Vazio", cor: GCOR.vazio, vals: porSis.map((x) => x.vazio) }] }),
+          rosca("Situação dos dispositivos", [
+            { nome: "Online / Operando", cor: GCOR.ok, val: ok },
+            { nome: "Verificar", cor: GCOR.ver, val: r.status.VERIFICAR || 0 },
+            { nome: "Falha / Offline", cor: GCOR.falha, val: (r.status.FALHA || 0) + (r.status.OFFLINE || 0) },
+            { nome: "Vazio / sem status", cor: GCOR.vazio, val: (r.status.VAZIO || 0) + (r.status["-"] || 0) },
+          ]),
+          grafico({ titulo: "Senhas confirmadas x a confirmar", horiz: true, empilhado: true, rotulos: true, cats: porSis.filter((x) => x.conf + x.aconf).map((x) => x.s), series: [{ nome: "Confirmadas", cor: GCOR.ok, vals: porSis.filter((x) => x.conf + x.aconf).map((x) => x.conf) }, { nome: "A confirmar", cor: GCOR.falha, vals: porSis.filter((x) => x.conf + x.aconf).map((x) => x.aconf) }] }),
+          grafico({ titulo: "Pendências abertas x concluídas (últimos 6 meses)", rotulos: true, cats: meses.map((x) => x[0]), series: [{ nome: "Abertas", cor: GCOR.falha, vals: meses.map((x) => x[1]) }, { nome: "Concluídas", cor: GCOR.ok, vals: meses.map((x) => x[2]) }] }),
+          grafico({ titulo: "Pendências em aberto por sistema", horiz: true, rotulos: true, cats: porSis.map((x) => x.s), series: [{ nome: "Em aberto", cor: "#C00000", vals: porSis.map((x) => x.pend) }] }),
+          grafico({ titulo: "Dispositivos por pavimento", cats: pavs, series: [{ nome: "Dispositivos", cor: GCOR.azul, vals: pavs.map((p) => pavCont[p]) }] }),
+          grafico({ titulo: "Tipos de equipamento mais comuns", horiz: true, rotulos: true, cats: topTipos.map((x) => x[0]), series: [{ nome: "Dispositivos", cor: GCOR.azul, vals: topTipos.map((x) => x[1]) }] }),
+          grafico({ titulo: "Alertas a conferir por tipo", horiz: true, empilhado: true, rotulos: true, cats: alTipos, series: [{ nome: "Pendentes", cor: GCOR.ver, vals: alTipos.map((t) => alAt.filter((a) => a.tipo === t && a.sit !== "NOK").length) }, { nome: "NOK (confirmados)", cor: GCOR.falha, vals: alTipos.map((t) => alAt.filter((a) => a.tipo === t && a.sit === "NOK").length) }] }),
+        ];
+        imgs.forEach((b64, k) => {
+          const id = wb.addImage({ base64: b64, extension: "png" });
+          P.addImage(id, { tl: { col: k % 2 ? 8.1 : 0, row: 14.3 + Math.floor(k / 2) * 16 }, ext: { width: 600, height: 282 } });
+        });
+        // resumo por sistema
+        const R = 14 + 4 * 16 + 2;
+        faixa(P, R, 1, 16, "RESUMO POR SISTEMA", 11, 22);
+        const hres = ["Sistema", "Total", "Online / Operando", "Verificar", "Falha / Offline", "Senhas a confirmar", "Pendências em aberto", "Disponibilidade"];
+        hres.forEach((h, k) => {
+          P.mergeCells(R + 1, 1 + 2 * k, R + 1, 2 + 2 * k);
+          cab(P, R + 1, 1 + 2 * k, h);
+        });
+        P.getRow(R + 1).height = 24;
+        [...porSis, null].forEach((x, j) => {
+          const lin = R + 2 + j,
+            T = !x;
+          const tt = T ? porSis.reduce((a, y) => ({ s: "Total", total: a.total + y.total, ok: a.ok + y.ok, ver: a.ver + y.ver, falha: a.falha + y.falha, vazio: a.vazio + y.vazio, aconf: a.aconf + y.aconf, pend: a.pend + y.pend }), { total: 0, ok: 0, ver: 0, falha: 0, vazio: 0, aconf: 0, pend: 0 }) : x;
+          const b = tt.ok + tt.ver + tt.falha; // mesma conta do quadro: sem vazios e sem "sem status"
+          [tt.s, tt.total, tt.ok, tt.ver, tt.falha, tt.aconf, tt.pend, b ? tt.ok / b : 0].forEach((v, k) => {
+            P.mergeCells(lin, 1 + 2 * k, lin, 2 + 2 * k);
+            const c = P.getCell(lin, 1 + 2 * k);
+            c.value = v;
+            c.font = xFont({ bold: T || k === 0 });
+            c.alignment = { horizontal: k ? "center" : "left" };
+            if (k === 7) c.numFmt = "0.0%";
+            for (const cc of [1 + 2 * k, 2 + 2 * k]) {
+              P.getCell(lin, cc).border = xBorda;
+              P.getCell(lin, cc).fill = xFill(T ? "D9D9D9" : j % 2 ? XC.zebra : "FFFFFF");
+            }
+          });
+        });
+        P.getCell(R + 4 + porSis.length, 1).value = "Disponibilidade = Online/Operando ÷ (total − vazios − sem status). Gráficos e quadros mostram a situação no momento da exportação.";
+        P.getCell(R + 4 + porSis.length, 1).font = xFont({ size: 9, italic: true, color: "7F7F7F" });
+
+        /* ---------- abas por sistema ---------- */
+        const pendPorId = mapaPend();
+        for (const sis of sists) {
+          const doc = S.inv[sis],
+            itens = doc.itens || [],
+            ac = (S.aces[sis] || {}).acessos || {};
+          const cols = [
+            ["id", "ID", 11],
+            ["tipo", "Tipo", 18],
+            ["cat", "Tipo no catálogo", 22],
+            ["modelo", "Modelo", 18],
+            ["fabricante", "Fabricante", 13],
+            ["tag", "TAG", 34],
+            ["ip", "IP", 15],
+            ["pav", "Pavimento", 11],
+            ...(EXTRAS[sis] || []).map((k) => [k, ROT[k], 9]),
+            ["status", "Status", 12],
+            ["pend", "Pendências em aberto", 12],
+            ["sconf", "Senha confirmada em", 17],
+            ...(semSenhas ? [] : ["login", "senha", ...(temAcesso2(sis) ? ["login2", "senha2"] : [])].map((k) => [k, rotSis(sis, k), 14])),
+            ["obs", "Observação", 30],
+          ];
+          const n = cols.length,
+            W = nova(sis, { frz: 9 });
+          cols.forEach(([, , w], i) => (W.getColumn(i + 1).width = w));
+          if (logoId !== null) W.addImage(logoId, { tl: { col: 0, row: 0.2 }, ext: { width: 200, height: 27 } });
+          W.getCell(2, n).value = "Atualizado em";
+          W.getCell(2, n).font = xFont({ size: 9, color: "595959" });
+          W.getCell(2, n).alignment = { horizontal: "right" };
+          W.getCell(3, n).value = doc.atualizadoEm || hj;
+          W.getCell(3, n).font = xFont({ bold: true });
+          W.getCell(3, n).alignment = { horizontal: "right" };
+          faixa(W, 5, 1, n, `${nome.toUpperCase()} | ${sis}${doc.fabricante ? " | " + doc.fabricante : ""}`);
+          const ci = Object.fromEntries(cols.map(([k], i) => [k, i + 1]));
+          const st = colL(ci.status),
+            fim = 10 + Math.max(itens.length, 1) - 1;
+          const cnt = (f) => itens.filter(f).length;
+          quadro(W, 6, 1, "Dispositivos", { formula: `COUNTA(A10:A${fim})`, result: itens.length }, "F2F2F2", XC.grafite, "0");
+          quadro(W, 6, 2, "Online / Operando", { formula: `COUNTIF(${st}10:${st}${fim},"ONLINE")+COUNTIF(${st}10:${st}${fim},"OPERANDO")`, result: cnt((i) => ["ONLINE", "OPERANDO"].includes(i.status)) }, ...XC.ok, "0");
+          quadro(W, 6, 3, "Verificar", { formula: `COUNTIF(${st}10:${st}${fim},"VERIFICAR")`, result: cnt((i) => i.status === "VERIFICAR") }, ...XC.ver, "0");
+          quadro(W, 6, 4, "Falha / Offline", { formula: `COUNTIF(${st}10:${st}${fim},"FALHA")+COUNTIF(${st}10:${st}${fim},"OFFLINE")`, result: cnt((i) => ["FALHA", "OFFLINE"].includes(i.status)) }, ...XC.falha, "0");
+          quadro(W, 6, 5, "Vazio", { formula: `COUNTIF(${st}10:${st}${fim},"VAZIO")`, result: cnt((i) => i.status === "VAZIO") }, ...XC.vazio, "0");
+          quadro(W, 6, 6, "Senhas a confirmar", cnt((i) => senhaPend(sis, i, S.aces)), "FDE9E7", "9C0006", "0");
+          quadro(W, 6, 7, "Com pendência", cnt((i) => (pendPorId.get(i.id) || []).some((p) => p.aberta)), "FCE4D6", "843C0C", "0");
+          W.getRow(6).height = 26;
+          W.getRow(7).height = 30;
+          cols.forEach(([k, t], i) => cab(W, 9, i + 1, t, ACESSO.includes(k) ? XC.acesso : XC.cinza));
+          W.getRow(9).height = 24;
+          itens.forEach((it, j) => {
+            const lin = 10 + j,
+              a = ac[it.id] || {},
+              tc = tipoCat(tipoCatDe(sis, it));
+            const v = {
+              ...it,
+              tipo: it.tipo + (leg[sis + "|" + it.tipo] ? ` (${leg[sis + "|" + it.tipo]})` : ""),
+              cat: tc ? tc.nome : "SEM CATÁLOGO",
+              pend: (pendPorId.get(it.id) || []).filter((p) => p.aberta).length || "",
+              sconf: it.verificado ? dh(it.verificado) : senhaPend(sis, it, S.aces) ? "A CONFIRMAR" : "",
+              login: a.login,
+              senha: a.senha,
+              login2: a.login2,
+              senha2: a.senha2,
+            };
+            cols.forEach(([k], i) => {
+              const c = W.getCell(lin, i + 1);
+              let x = v[k] ?? "";
+              if ((k === "nvr" || k === "canal") && /^\d+$/.test(String(x))) x = +x;
+              c.value = x === "" ? null : x;
+              c.font = xFont({ bold: k === "pend" && !!x, color: k === "pend" && x ? "C00000" : k === "sconf" && x === "A CONFIRMAR" ? "9C0006" : k === "cat" && x === "SEM CATÁLOGO" ? "C00000" : "000000" });
+              c.border = xBorda;
+              c.alignment = { vertical: "middle", horizontal: ["id", "pav", "nvr", "canal", "laco", "status", "pend", "sconf"].includes(k) ? "center" : "left" };
+              if (j % 2) c.fill = xFill(XC.zebra);
+            });
+          });
+          statusCF(W, `${st}10:${st}${fim + 200}`, `${st}10`);
+          W.autoFilter = { from: { row: 9, column: 1 }, to: { row: fim, column: n } };
+          W.pageSetup.printTitlesRow = "9:9";
+        }
+
+        /* ---------- Pendências do diário ---------- */
+        const PD = nova("Pendências", { frz: 4 });
+        if (logoId !== null) PD.addImage(logoId, { tl: { col: 0, row: 0.1 }, ext: { width: 200, height: 27 } });
+        const pc = [
+          ["Situação", 12],
+          ["Aberta em", 11],
+          ["Sistema", 13],
+          ["Tipo no catálogo", 22],
+          ["Título", 34],
+          ["Problema", 40],
+          ["Status", 18],
+          ["Aberta por", 16],
+          ["Concluída em", 12],
+          ["Concluída por", 16],
+          ["Solução", 40],
+          ["Dias", 7],
+          ["Dispositivo(s)", 22],
+        ];
+        faixa(PD, 3, 1, pc.length, `${nome.toUpperCase()} | PENDÊNCIAS DO DIÁRIO`, 14, 28);
+        pc.forEach(([h, w], i) => {
+          PD.getColumn(i + 1).width = w;
+          cab(PD, 4, i + 1, h);
+        });
+        const ord = pend.slice().sort((a, b) => (a.aberta === b.aberta ? String(b.criada || "").localeCompare(String(a.criada || "")) : a.aberta ? -1 : 1));
+        ord.forEach((p, j) => {
+          const t = tipoCat(p.tipoId),
+            ids = pendDisp(p);
+          const dias = p.criada ? Math.round(((p.aberta ? new Date() : new Date(p.concluidaEm || p.criada)) - new Date(p.criada)) / 864e5) : "";
+          [p.aberta ? "EM ABERTO" : "CONCLUÍDA", bd(p.criada), pendSis(p), t ? t.nome : "", p.titulo || "", p.problema || "", p.status || "", p.criadaPorNome || "", bd(p.concluidaEm), p.concluidaPorNome || "", p.solucao || "", dias, ids.join(", ")].forEach((v, i) => {
+            const c = PD.getCell(5 + j, i + 1);
+            c.value = v === "" ? null : v;
+            c.font = xFont({ bold: i === 0 });
+            c.border = xBorda;
+            c.alignment = { vertical: "top", wrapText: [4, 5, 10].includes(i), horizontal: [0, 1, 8, 11].includes(i) ? "center" : "left" };
+            if (j % 2) c.fill = xFill(XC.zebra);
+          });
+        });
+        PD.addConditionalFormatting({
+          ref: `A5:A${5 + Math.max(ord.length, 1)}`,
+          rules: [
+            { type: "expression", formulae: ['A5="EM ABERTO"'], style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: argb(XC.falha[0]) } }, font: { bold: true, color: { argb: argb(XC.falha[1]) } } } },
+            { type: "expression", formulae: ['A5="CONCLUÍDA"'], style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: argb(XC.ok[0]) } }, font: { bold: true, color: { argb: argb(XC.ok[1]) } } } },
+          ],
+        });
+        if (!ord.length) PD.getCell(5, 1).value = "Nenhuma pendência registrada no diário para este cliente.";
+        PD.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + Math.max(ord.length, 1), column: pc.length } };
+
+        /* ---------- Pavimentos (pavimento × sistema) ---------- */
+        const PV = nova("Pavimentos", { frz: 7 });
+        faixa(PV, 5, 1, sists.length + 2, `${nome.toUpperCase()} | DISPOSITIVOS POR PAVIMENTO`, 14, 28);
+        PV.getColumn(1).width = 16;
+        cab(PV, 7, 1, "Pavimento");
+        sists.forEach((s, i) => {
+          cab(PV, 7, i + 2, s);
+          PV.getColumn(i + 2).width = 14;
+        });
+        cab(PV, 7, sists.length + 2, "Total");
+        [...pavs, "(sem pavimento)"].forEach((pv, j) => {
+          const lin = 8 + j;
+          PV.getCell(lin, 1).value = pv;
+          PV.getCell(lin, 1).font = xFont({ bold: true });
+          PV.getCell(lin, 1).border = xBorda;
+          let t = 0;
+          sists.forEach((s, i) => {
+            const q = (S.inv[s].itens || []).filter((it) => (pv === "(sem pavimento)" ? !it.pav : it.pav === pv)).length;
+            t += q;
+            const c = PV.getCell(lin, i + 2);
+            c.value = q || null;
+            c.border = xBorda;
+            c.alignment = { horizontal: "center" };
+          });
+          const c = PV.getCell(lin, sists.length + 2);
+          c.value = t;
+          c.font = xFont({ bold: true });
+          c.border = xBorda;
+          c.fill = xFill("F2F2F2");
+          c.alignment = { horizontal: "center" };
+        });
+        PV.addConditionalFormatting({ ref: `B8:${colL(sists.length + 1)}${8 + pavs.length}`, rules: [{ type: "colorScale", cfvo: [{ type: "num", value: 0 }, { type: "max" }], color: [{ argb: "FFFFFFFF" }, { argb: "FF5B9BD5" }] }] });
+
+        /* ---------- Alertas ---------- */
+        const AL = nova("Alertas", { frz: 3 });
+        const ac2 = [
+          ["Situação", 12],
+          ["Sistema", 13],
+          ["Alerta", 26],
+          ["TAG / Item", 30],
+          ["Detalhe", 60],
+          ["Dispositivos", 26],
+          ["Justificativa", 36],
+          ["Conferido por", 16],
+          ["Data", 11],
+        ];
+        faixa(AL, 1, 1, ac2.length, "ALERTAS PARA CONFERIR", 12, 24);
+        ac2.forEach(([h, w], i) => {
+          AL.getColumn(i + 1).width = w;
+          cab(AL, 3, i + 1, h);
+        });
+        al.forEach((a, j) => {
+          [a.sit, a.sis, a.tipo, a.tag, a.texto, a.ids.join(", "), a.just, a.por, a.data].forEach((v, i) => {
+            const c = AL.getCell(4 + j, i + 1);
+            c.value = v || null;
+            c.font = xFont({ bold: i === 0 || i === 2, color: a.sit === "OK" ? "8C8C8C" : "000000" });
+            c.border = xBorda;
+            c.alignment = { vertical: "top", wrapText: i === 4 || i === 5 };
+          });
+        });
+        AL.addConditionalFormatting({
+          ref: `A4:A${4 + Math.max(al.length, 1)}`,
+          rules: [
+            ["PENDENTE", XC.ver],
+            ["NOK", XC.falha],
+            ["OK", XC.ok],
+          ].map(([v, [bg, fg]]) => ({ type: "expression", formulae: [`A4="${v}"`], style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: argb(bg) } }, font: { bold: true, color: { argb: argb(fg) } } } })),
+        });
+        AL.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3 + Math.max(al.length, 1), column: ac2.length } };
+
+        /* ---------- Catálogo (ligações) e Legenda ---------- */
+        const CT = nova("Catálogo", { frz: 3 });
+        const cc = [
+          ["Sistema", 14],
+          ["Tipo na planilha", 26],
+          ["Descrição (Legenda)", 28],
+          ["Tipo no catálogo", 28],
+          ["Perfil neste cliente", 20],
+          ["Na preventiva", 18],
+          ["Dispositivos", 12],
+        ];
+        faixa(CT, 1, 1, cc.length, "LIGAÇÃO COM O CATÁLOGO DO DIÁRIO E LEGENDA", 12, 24);
+        cc.forEach(([h, w], i) => {
+          CT.getColumn(i + 1).width = w;
+          cab(CT, 3, i + 1, h);
+        });
+        let lc = 4;
+        for (const s of sists) {
+          const cont = {};
+          (S.inv[s].itens || []).forEach((it) => (cont[it.tipo] = (cont[it.tipo] || 0) + 1));
+          for (const [tp, q] of Object.entries(cont).sort((a, b) => b[1] - a[1])) {
+            const id = ((S.icfg && S.icfg.mapa) || {})[chaveTipo(s, tp)],
+              t = tipoCat(id),
+              pf = +((m.perfilPadrao || {})[id] || 0);
+            [s, tp, leg[s + "|" + tp] || "", t ? t.nome : "SEM CATÁLOGO", t ? ((t.perfis || [])[pf] || {}).nome || "Padrão" : "", t ? (selecaoDe(t.id) === "todos" ? "Todos (marcados)" : "Escolher quais") : "", q].forEach((v, i) => {
+              const c = CT.getCell(lc, i + 1);
+              c.value = v === "" ? null : v;
+              c.border = xBorda;
+              c.font = xFont({ bold: i === 0, color: v === "SEM CATÁLOGO" ? "C00000" : "000000" });
+            });
+            lc++;
+          }
+        }
+
+        /* ---------- Detalhes (servidores, NVRs, centrais) ---------- */
+        const comDet = sists.flatMap((s) => (S.inv[s].itens || []).filter((it) => (it.detalhes || []).length || (!semSenhas && (((S.aces[s] || {}).acessos || {})[it.id] || {}).outros)).map((it) => [s, it]));
+        if (comDet.length) {
+          const DT = nova("Detalhes", { frz: 3 });
+          faixa(DT, 1, 1, 5, "DETALHES DE SERVIDORES, GRAVADORES E CENTRAIS", 12, 24);
+          [
+            ["Sistema", 13],
+            ["ID", 11],
+            ["TAG", 26],
+            ["Campo", 34],
+            ["Valor", 40],
+          ].forEach(([h, w], i) => {
+            DT.getColumn(i + 1).width = w;
+            cab(DT, 3, i + 1, h);
+          });
+          let ld = 4;
+          for (const [s, it] of comDet) {
+            const linhas = [...(it.detalhes || []), ...(semSenhas ? [] : (((S.aces[s] || {}).acessos || {})[it.id] || {}).outros || [])];
+            for (const [k, v] of linhas) {
+              [s, it.id, it.tag, k, v].forEach((x, i) => {
+                const c = DT.getCell(ld, i + 1);
+                c.value = x || null;
+                c.border = xBorda;
+                c.font = xFont({ bold: i === 3, color: RE_SENHA.test(k) && i === 4 ? XC.acesso : "000000" });
+              });
+              ld++;
+            }
+          }
+        }
+
+        const buf = await wb.xlsx.writeBuffer();
+        const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `Inventario_${semAcento(nome).replace(/[^A-Za-z0-9]+/g, "_")}${semSenhas ? "_SEM_SENHAS" : ""}_${hoje()}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(a.href);
+          a.remove();
+        }, 2000);
+        audita("exportou inventário", "inventarioMeta", S.cliId, `${nome}${semSenhas ? " (sem senhas)" : " (com senhas)"}`);
+        toast("Planilha gerada");
+      }
+
       boot();
     </script>
   </body>
