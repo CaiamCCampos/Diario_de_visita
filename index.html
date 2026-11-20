@@ -726,11 +726,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         });
       }
       let _avisoRede = 0;
+      const NOME_COL = { clientes: "clientes", pendencias: "pendências", visitas: "visitas", autorizacoes: "acessos temporários", simulados: "simulados", auditoria: "auditoria" };
       function avisaRede(c, e) {
         console.error("listen " + c, e);
+        S.ultFalha = { col: c, code: (e && e.code) || "", em: new Date().toLocaleTimeString("pt-BR") };
         if (Date.now() - _avisoRede > 30000) {
           _avisoRede = Date.now();
-          toast("Não consegui atualizar os dados. Verifique a internet.");
+          // diz o que falhou e o código, para dar para achar a causa
+          toast(`Não consegui atualizar ${NOME_COL[c] || c} (${(e && e.code) || "erro"}). ${e && e.code === "permission-denied" ? "Acesso recusado pelo Firebase." : "Verifique a internet."}`);
         }
       }
       function toast(msg) {
