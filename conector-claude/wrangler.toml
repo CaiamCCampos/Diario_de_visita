@@ -1,0 +1,8 @@
+# Conector do Diário Técnico para o Claude (MCP remoto, somente leitura)
+name = "diario-tecnico-conector"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+# Segredos (não ficam aqui): FIREBASE_SA e ACESSO_TOKEN
+# Cloudflare > Workers & Pages > diario-tecnico-conector > Settings > Variables and Secrets
