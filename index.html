@@ -2053,7 +2053,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       function vPuxaInv(c) {
         if (!S.invCli[c.id]) invDoCliente(c);
         const ci = S.invCli[c.id];
-        if (!ci || !ci.itens.length) return "";
+        if (!ci || !ci.ok) return '<div class="card"><p class="sm">Verificando o inventário deste cliente…</p></div>';
+        if (!ci.itens.length)
+          return `<div class="card"><b class="rd">Inventário</b><p class="sm" style="margin:4px 0 8px">${ci.erro ? `Não consegui ler o inventário deste cliente (${esc(ci.erro)}).` : "Este cliente ainda não tem inventário. Importe a planilha ou crie pelo catálogo no Inventário; depois os equipamentos podem ser puxados para cá."}</p><a class="b o s" href="inventario.html" style="display:inline-block;text-decoration:none">Abrir o Inventário</a></div>`;
         const P = planoPuxa(c);
         const ab = S.puxaAb;
         const lista = (l, f) => l.map(f).join("");
@@ -2167,11 +2169,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 itens.push({ id: it.id, sis: d.sistema, tag: it.tag || "", ip: it.ip || "", pav: it.pav || "", tipo: it.tipo || "", status: it.status || "", quadro: it.quadro || "", tipoCat: it.tipoCat || mapa[`${d.sistema}|${String(it.tipo || "").toUpperCase()}`] || "" }),
               ),
             );
-            const mudou = JSON.stringify(itens) !== JSON.stringify(S.invCli[c.id].itens);
-            S.invCli[c.id] = { itens, t: Date.now() };
+            const mudou = JSON.stringify(itens) !== JSON.stringify(S.invCli[c.id].itens) || !S.invCli[c.id].ok;
+            S.invCli[c.id] = { itens, t: Date.now(), ok: true };
             if (mudou) render();
           } catch (e) {
             console.warn("inventário do cliente", e.code || e.message);
+            S.invCli[c.id] = { itens: [], t: Date.now(), ok: true, erro: e.code || e.message };
+            render();
           }
         })();
         return [];
