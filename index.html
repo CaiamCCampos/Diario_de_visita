@@ -2054,7 +2054,6 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       /* ---- Inventário (inventario.html): a pendência escolhe o dispositivo e pode mudar a situação dele ---- */
       const SIT_DISP = ["ONLINE", "OPERANDO", "VERIFICAR", "FALHA", "OFFLINE"];
       const semAc = (x) => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const dispTxt = (d) => [d.id, d.tag || "(sem TAG)", d.ip, d.pav].filter(Boolean).join(" · ");
       S.invCli = {}; // clienteId -> { itens: [...] } (dispositivos do inventário, carregados quando precisa)
       function invDoCliente(c) {
         if (!c || !c.id) return [];
@@ -2080,15 +2079,45 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         })();
         return [];
       }
-      function campoDisp(b, c) {
+      // sistemas do inventário que têm outro nome no catálogo
+      const SIS_INV_CAT = { "AUTOMAÇÃO": "SSCU", "AUTOMACAO": "SSCU", "SONORIZAÇÃO": "SSON", "SONORIZACAO": "SSON" };
+      const sisCatDe = (sis) => SIS_INV_CAT[String(sis || "").toUpperCase()] || sis;
+      const cliDoPath = (b) => (b.startsWith("pc.") ? S.cli : S.vcli);
+      // dispositivos oferecidos para a pendência: só os do sistema dela, com os do mesmo tipo primeiro
+      function listaDisp(b, c) {
         const L = invDoCliente(c);
-        if (!L.length) return { inp: "", sit: "" };
         const tId = val(b + ".tipoId"),
-          cand = tId ? L.filter((d) => d.tipoCat === tId) : [],
-          opc = cand.length ? cand : L;
+          t = tId && S.cat.tipos.find((x) => x.id === tId),
+          sis = (t && t.sis) || val(b + ".sis") || "";
+        const doSis = sis ? L.filter((d) => sisCatDe(d.sis) === sis) : L;
+        return { L, sis, tId, lista: doSis.length ? doSis : L, filtrou: !!sis && doSis.length > 0 };
+      }
+      function opcoesDisp(b, c, filtro) {
+        const { L, tId, lista } = listaDisp(b, c);
+        const atualId = val(b + ".dispId") || "";
+        const f = semAc(filtro || "").toUpperCase().trim();
+        const txt = (d) => [d.tag || "(sem TAG)", d.ip, d.pav, d.id].filter(Boolean).join(" · ");
+        let l = f ? lista.filter((d) => semAc(txt(d) + " " + d.tipo).toUpperCase().includes(f)) : lista;
+        const atual = L.find((d) => d.id === atualId);
+        if (atual && !l.includes(atual)) l = [atual, ...l]; // o escolhido continua aparecendo
+        const grupos = new Map();
+        l.forEach((d) => {
+          const g = (d.sis ? d.sis + " · " : "") + (d.tipo || "Sem tipo");
+          (grupos.get(g) || grupos.set(g, { g, mesmo: !!tId && d.tipoCat === tId, it: [] }).get(g)).it.push(d);
+        });
+        const gs = [...grupos.values()].sort((x, y) => y.mesmo - x.mesmo || x.g.localeCompare(y.g, "pt-BR"));
+        gs.forEach((x) => x.it.sort((a, z) => String(a.tag || a.id).localeCompare(String(z.tag || z.id), "pt-BR", { numeric: true })));
+        return (
+          `<option value="">${f && !l.length ? "— nada encontrado —" : "— escolha o dispositivo —"}</option>` +
+          gs.map((x) => `<optgroup label="${esc(x.g + (x.mesmo ? " (tipo da pendência)" : "") + " · " + x.it.length)}">${x.it.map((d) => `<option value="${esc(d.id)}"${d.id === atualId ? " selected" : ""}>${esc(txt(d))}</option>`).join("")}</optgroup>`).join("")
+        );
+      }
+      function campoDisp(b, c) {
+        const { L, sis, lista, filtrou } = listaDisp(b, c);
+        if (!L.length) return { inp: "", sit: "" };
         const atual = L.find((d) => d.id === val(b + ".dispId"));
-        const dl = "dl_" + b.replace(/\W/g, "_");
-        const inp = `<div><label>Dispositivo do inventário${cand.length ? ` (${cand.length} deste tipo)` : ""}</label><input data-disp="${esc(b)}" list="${dl}" value="${esc(atual ? dispTxt(atual) : val(b + ".dispId") || "")}" placeholder="Digite a TAG, o IP ou o ID e escolha" autocomplete="off"><datalist id="${dl}">${opc.map((d) => `<option value="${esc(dispTxt(d))}">`).join("")}</datalist>${atual ? `<div class="sm" data-dsit="${esc(atual.id)}">${esc(atual.sis)} · situação no inventário: <b>${esc(atual.status || "—")}</b></div>` : ""}</div>`;
+        const rot = filtrou ? `Dispositivo do inventário · ${esc(sis)} (${lista.length})` : `Dispositivo do inventário (${L.length})`;
+        const inp = `<div><label>${rot}</label>${lista.length > 25 ? `<input data-dfil="${esc(b)}" placeholder="Filtrar a lista: TAG, IP, pavimento ou tipo" autocomplete="off" style="margin-bottom:6px">` : ""}<select data-disp="${esc(b)}">${opcoesDisp(b, c)}</select>${atual ? `<div class="sm" data-dsit="${esc(atual.id)}">${esc(atual.sis)} · situação no inventário: <b>${esc(atual.status || "—")}</b></div>` : !filtrou ? '<div class="sm">Escolha o tipo de equipamento para ver só os dispositivos do sistema da pendência.</div>' : ""}</div>`;
         const sit = atual ? fSel(b + ".dispStatus", "Situação do dispositivo (vai para o inventário)", [["", "— não alterar —"], ...SIT_DISP.map((x) => [x, x])]) : "";
         return { inp, sit };
       }
@@ -3647,6 +3676,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           $("#listaClientes").innerHTML = vListaClientes();
           return;
         }
+        if (el.dataset.dfil !== undefined) {
+          const b = el.dataset.dfil,
+            sel = [...document.querySelectorAll("select[data-disp]")].find((x) => x.dataset.disp === b);
+          if (sel) sel.innerHTML = opcoesDisp(b, cliDoPath(b), el.value);
+          return;
+        }
         const p = el.dataset.p;
         if (!p) return;
         let v = el.type === "checkbox" ? el.checked : el.value;
@@ -3722,16 +3757,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (e.target.dataset && e.target.dataset.disp !== undefined) {
           const b = e.target.dataset.disp,
             t = e.target.value.trim();
-          const cl = b.startsWith("pc.") ? S.cli : S.vcli;
-          const L = invDoCliente(cl);
-          const id = t.split(" · ")[0].trim();
-          const d = L.find((x) => x.id === id) || L.find((x) => x.tag && x.tag.toUpperCase() === t.toUpperCase());
+          const L = invDoCliente(cliDoPath(b));
+          const d = L.find((x) => x.id === t);
           if (d) {
             [["dispId", d.id], ["dispSis", d.sis], ["dispTag", d.tag], ["dispIp", d.ip], ["dispPav", d.pav]].forEach(([k, v]) => setPath(b + "." + k, v));
             if (!val(b + ".tipoId") && d.tipoCat && S.cat.tipos.some((x) => x.id === d.tipoCat)) {
               setPath(b + ".tipoId", d.tipoCat);
               setPath(b + ".sis", tp(d.tipoCat).sis);
-            }
+            } else if (!val(b + ".sis")) setPath(b + ".sis", sisCatDe(d.sis));
             if (!String(val(b + ".titulo") || "").trim()) setPath(b + ".titulo", d.tag || d.id);
           } else if (!t) ["dispId", "dispSis", "dispTag", "dispIp", "dispPav", "dispStatus"].forEach((k) => setPath(b + "." + k, ""));
           else {
