@@ -1933,7 +1933,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   <div class="kpis"><div class="kpi"><div class="r">Clientes com inventário</div><div class="n">${com.length}</div></div><div class="kpi"><div class="r">Dispositivos</div><div class="n">${tot.d}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${tot.sp}</div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${tot.al}</div></div><div class="kpi"><div class="r">Clientes sem inventário</div><div class="n">${sem.length}</div></div></div>
   <label>Buscar cliente</label><input id="busca" data-f="busca" value="${esc(S.busca)}" placeholder="Nome ou MP"></div>
   <div class="card"><h2>Com inventário</h2>${com.map(card).join("") || '<p class="sm">Nenhum inventário ainda.' + (pode("inv.importar") ? " Use Importar planilha." : "") + "</p>"}</div>
-  ${sem.length ? `<div class="card"><h2>Sem inventário</h2>${sem.map((c) => `<div class="li" style="cursor:default"><div class="t"><b>${esc(c.unidade)}</b><span>${c.mp ? `<span class="chip">${esc(c.mp)}</span> ` : ""}${pode("inv.importar") ? `<button class="b s" data-a="impCli" data-id="${esc(c.id)}" style="margin:0">Importar planilha</button>` : ""}</span></div></div>`).join("")}</div>` : ""}`;
+  ${sem.length ? `<div class="card"><h2>Sem inventário</h2>${sem.map((c) => `<div class="li" style="cursor:default"><div class="t"><b>${esc(c.unidade)}</b><span>${c.mp ? `<span class="chip">${esc(c.mp)}</span> ` : ""}${pode("inv.importar") ? `<button class="b s" data-a="impCli" data-id="${esc(c.id)}" style="margin:0">Importar planilha</button> <button class="b o s" data-a="criaCat" data-id="${esc(c.id)}" style="margin:0">Criar pelo catálogo</button>` : ""}</span></div></div>`).join("")}</div>` : ""}`;
       }
 
       /* ---- importação (só administrador) ---- */
@@ -1980,7 +1980,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const cli = S.clientes.find((c) => c.id === S.cliId) || { unidade: S.meta ? S.meta.clienteNome : "Cliente" };
         const m = S.meta;
         if (!m && !Object.keys(S.inv).length)
-          return `<div class="card"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3 style="margin-top:10px">${esc(cli.unidade)}</h3><p class="sm">Este cliente ainda não tem inventário. Importe a planilha ou cadastre os dispositivos um a um.</p>${pode("inv.importar") ? `<button class="b" data-a="impCli" data-id="${esc(S.cliId)}">Importar planilha</button><button class="b o" data-a="novoItem" data-sis="CFTV">Cadastrar dispositivo</button>` : ""}</div>${S.novo ? vNovo() : ""}`;
+          return `<div class="card"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3 style="margin-top:10px">${esc(cli.unidade)}</h3><p class="sm">Este cliente ainda não tem inventário. Importe a planilha ou cadastre os dispositivos um a um.</p>${pode("inv.importar") ? `<button class="b" data-a="impCli" data-id="${esc(S.cliId)}">Importar planilha</button><button class="b o" data-a="criaCat" data-id="${esc(S.cliId)}">Criar pelo catálogo</button><button class="b o" data-a="novoItem" data-sis="CFTV">Cadastrar dispositivo</button>` : ""}</div>${S.criaCat ? vCriaCat() : ""}${S.novo ? vNovo() : ""}`;
         const al = calcAlertas(S.inv, m),
           alAt = al.filter(alertaAtivo).length;
         const r = resumo(S.inv, m, S.aces);
@@ -1994,10 +1994,61 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "capacidade" ? "on" : ""}" data-aba="capacidade">Capacidade${nCapCheio ? ` <span class="chip red">${nCapCheio}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
         const corpo = S.aba === "capacidade" ? vCapacidade() : S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
         return `<div class="card cinl"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3>${esc(cli.unidade)}</h3><div class="cacts">${cli.mp ? `<span class="chip">${esc(cli.mp)}</span>` : ""}<span class="chip">v${(m && m.versao) || 1}</span>
-  ${pode("inv.novo") ? `<button class="b s" data-a="novoItem" data-sis="${esc(S.inv[S.aba] ? S.aba : "")}">+ Adicionar dispositivo</button>` : ""}${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
+  ${pode("inv.novo") ? `<button class="b s" data-a="novoItem" data-sis="${esc(S.inv[S.aba] ? S.aba : "")}">+ Adicionar dispositivo</button><button class="b o s" data-a="criaCat" data-id="${esc(S.cliId)}">+ Pelo catálogo</button>` : ""}${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
   <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
   <div class="kpis"><div class="kpi"><div class="r">Dispositivos</div><div class="n">${r.total}</div></div><div class="kpi ok"><div class="r">Disponibilidade</div><div class="n">${String(disp).replace(".", ",")}%</div></div><div class="kpi am"><div class="r">Falha</div><div class="n">${r.status.FALHA || 0}</div></div><div class="kpi red"><div class="r">Offline</div><div class="n">${r.status.OFFLINE || 0}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${r.senhasPend}</div></div><div class="kpi ok"><div class="r">Senhas confirmadas</div><div class="n">${r.verificados}<span class="sm"> de ${r.comSenha}</span></div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${alAt}</div></div></div>
-  ${S.novo ? vNovo() : ""}${tabs}<div class="aux">${corpo}</div>`;
+  ${S.criaCat ? vCriaCat() : ""}${S.novo ? vNovo() : ""}${tabs}<div class="aux">${corpo}</div>`;
+      }
+      /* ---- criar inventário a partir do Catálogo do diário: escolhe os tipos e quantidades (e os equipamentos já
+         cadastrados no cliente, no diário), e o sistema gera os dispositivos já ligados ao tipo do catálogo ---- */
+      const CAT_SIS = { SSCU: "AUTOMAÇÃO", SSON: "SONORIZAÇÃO" };
+      const sisInv = (sigla) => CAT_SIS[sigla] || sigla;
+      const ABREV = [[/CAMERA/, "CAM"], [/NVR|DVR/, "NVR"], [/FUMACA/, "DF"], [/TEMPERATURA/, "DT"], [/ACIONADOR/, "AM"], [/SIRENE|SINALIZADOR/, "SIR"], [/SUPERVISAO/, "MS"], [/MODULO DE COMANDO/, "MC"], [/MODULO DE ZONA/, "MZ"], [/CONTROLADORA/, "CTRL"], [/LEITORA|FACIAL/, "LEIT"], [/SWITCH/, "SW"], [/ANTENA/, "ANT"], [/SERVIDOR/, "SRV"], [/CENTRAL|PAINEL/, "CENTRAL"], [/TECLADO/, "TEC"], [/SENSOR/, "SENS"], [/CAIXA DE SOM|SONORIZ|ALTO.?FALANTE/, "CX"], [/AMPLIFICADOR/, "AMP"], [/BOTOEIRA/, "BOT"], [/FECHADURA|ELETROIMA/, "FECH"], [/CATRACA/, "CAT"], [/MONITOR/, "MON"]];
+      const prefixoDe = (nome) => {
+        const N = semAcento(nome).toUpperCase();
+        const ab = ABREV.find(([re]) => re.test(N));
+        if (ab) return ab[1];
+        const p = N.replace(/\(.*?\)/g, "").split(/[^A-Z0-9]+/).filter((w) => w.length > 2 && !["DE", "DO", "DA", "DOS", "DAS", "PARA"].includes(w));
+        return p.length ? p[0].slice(0, 4) + (p[1] ? " " + p[1].slice(0, 3) : "") : "DISP";
+      };
+      function vCriaCat() {
+        const C = S.criaCat;
+        const cli = S.clientes.find((c) => c.id === C.cliId) || {};
+        const tipos = (S.cat && S.cat.tipos) || [];
+        const siglas = [...new Set(tipos.map((t) => t.sis))];
+        const nomeSis = (sg) => ((S.cat.sis || []).find((x) => x.sigla === sg) || {}).nome || sg;
+        const eqs = cli.eqs || [];
+        const jaTem = (eq) => Object.values(S.inv).some((d) => (d.itens || []).some((i) => nomeQ(i.tag) === nomeQ(eq.nome)));
+        const total = Object.values(C.qtd).reduce((a, n) => a + (+n || 0), 0) + Object.values(C.eqs).filter(Boolean).length;
+        const blocos = siglas
+          .map((sg) => {
+            const ts = tipos.filter((t) => t.sis === sg);
+            const ab = C.ab[sg] || ts.some((t) => +C.qtd[t.id] > 0);
+            return `<details class="eq"${ab ? " open" : ""} data-cab="${esc(sg)}"><summary class="sp"><b>${esc(sg)} · ${esc(nomeSis(sg))}</b><span class="chip">${ts.reduce((a, t) => a + (+C.qtd[t.id] || 0), 0)}</span></summary>
+  <div class="tblw"><table class="tbl"><thead><tr><th>Tipo do catálogo</th><th>Quantidade</th><th>Prefixo da TAG</th><th>Status inicial</th></tr></thead><tbody>${ts
+    .map(
+      (t) => `<tr><td>${esc(t.nome)}</td><td><input data-cc="qtd" data-t="${esc(t.id)}" type="number" min="0" max="500" value="${esc(C.qtd[t.id] || "")}" style="width:80px"></td>
+  <td><input data-cc="pref" data-t="${esc(t.id)}" value="${esc(C.pref[t.id] ?? prefixoDe(t.nome))}" style="width:130px"></td>
+  <td><select data-cc="st" data-t="${esc(t.id)}">${["", ...STATUS].map((x) => `<option${x === (C.st[t.id] || "") ? " selected" : ""}>${x}</option>`).join("")}</select></td></tr>`,
+    )
+    .join("")}</tbody></table></div></details>`;
+          })
+          .join("");
+        return `<div class="card" style="border:2px solid var(--p)"><h2>Criar inventário pelo catálogo — ${esc(cli.unidade || "")}</h2>
+  <p class="sm">Escolha quantos dispositivos de cada tipo do Catálogo do diário este cliente tem. O sistema cria cada um com a TAG <b>prefixo + número</b> (ex.: CAM 01, CAM 02…), já ligado ao tipo do catálogo. Depois é só completar IP, pavimento e o resto na ficha, pela aba Capacidade ou exportando a planilha. Nada que já existe é apagado.</p>
+  ${
+    eqs.length
+      ? `<div class="cent"><b class="rd">Equipamentos já cadastrados no cliente (diário)</b><div class="sm" style="margin:4px 0">Cada um marcado vira 1 dispositivo com o mesmo nome e tipo.</div>${eqs
+          .map((e) => {
+            const t = tipos.find((x) => x.id === e.tipo),
+              ja = jaTem(e);
+            return `<label class="k"><input type="checkbox" data-cc="eq" data-t="${esc(e.id)}"${C.eqs[e.id] ? " checked" : ""}${ja ? " disabled" : ""}> <span><b>${esc(e.nome || "(sem nome)")}</b>${e.local ? " · " + esc(e.local) : ""} <span class="sm">${t ? esc(t.sis + " · " + t.nome) : "tipo fora do catálogo"}${ja ? " · já está no inventário" : ""}</span></span></label>`;
+          })
+          .join("")}</div>`
+      : ""
+  }
+  ${blocos}
+  <div style="margin-top:10px"><button class="b" data-a="criaCatSalva"${total ? "" : " disabled"}>Criar ${total} dispositivo(s)</button><button class="b o" data-a="criaCatFecha">Cancelar</button></div></div>`;
       }
       /* ---- cadastro de um dispositivo novo (obra, câmera a mais, quadro de distribuição…) ---- */
       function vNovo() {
@@ -2834,6 +2885,74 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             toast("Dispositivo excluído");
           }
         },
+        criaCat(el) {
+          const id = el.dataset.id || S.cliId;
+          S.criaCat = { cliId: id, qtd: {}, pref: {}, st: {}, eqs: {}, ab: {} };
+          if (S.view !== "cliente" || S.cliId !== id) abreCliente(id);
+          else render();
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        },
+        criaCatFecha() {
+          S.criaCat = null;
+          render();
+        },
+        async criaCatSalva(el) {
+          const C = S.criaCat;
+          if (!C) return;
+          const cli = S.clientes.find((c) => c.id === C.cliId) || { id: C.cliId };
+          const tipos = (S.cat && S.cat.tipos) || [];
+          const novos = {}; // sistema → [itens]
+          const add = (sg, it) => (novos[sisInv(sg)] = novos[sisInv(sg)] || []).push(it);
+          for (const e of cli.eqs || []) {
+            if (!C.eqs[e.id]) continue;
+            const t = tipos.find((x) => x.id === e.tipo);
+            add(t ? t.sis : "CFTV", { tipo: (t ? t.nome : "EQUIPAMENTO").toUpperCase(), tag: txt(e.nome) || (t ? t.nome : "Equipamento"), obs: e.local ? "Local: " + e.local : "", tipoCat: t ? t.id : undefined, eqDiario: e.id });
+          }
+          for (const t of tipos) {
+            const n = Math.min(+C.qtd[t.id] || 0, 500);
+            if (!n) continue;
+            const pref = txt(C.pref[t.id] ?? prefixoDe(t.nome)) || prefixoDe(t.nome);
+            // continua a numeração se já houver TAGs com esse prefixo
+            const re = new RegExp("^" + pref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*(\\d+)$", "i");
+            let ini = 0;
+            Object.values(S.inv).forEach((d) => (d.itens || []).forEach((i) => {
+              const m = String(i.tag || "").match(re);
+              if (m) ini = Math.max(ini, +m[1]);
+            }));
+            const dig = String(ini + n).length < 2 ? 2 : String(ini + n).length;
+            for (let k = 1; k <= n; k++) add(t.sis, { tipo: t.nome.toUpperCase(), tag: `${pref} ${String(ini + k).padStart(dig, "0")}`, status: normSt(C.st[t.id] || ""), tipoCat: t.id });
+          }
+          const sists = Object.keys(novos);
+          if (!sists.length) return toast("Escolha pelo menos um tipo ou equipamento");
+          if (sists.some((x) => !S.inv[x]) && !pode("inv.importar")) return toast("Só o administrador cria um sistema novo no cliente");
+          el.disabled = true;
+          let n = 0;
+          try {
+            for (const sis of sists) {
+              const doc = S.inv[sis] ? clone(S.inv[sis]) : { id: docId(cli.id, sis), clienteId: cli.id, equipeId: cli.equipeId || "", sistema: sis, fabricante: "", itens: [], centrais: [] };
+              let prox = (doc.itens || []).reduce((m, a) => Math.max(m, +String(a.id).split("-").pop() || 0), 0);
+              for (const x of novos[sis]) {
+                const it = { id: `${CODIGO[sis] || sis}-${String(++prox).padStart(4, "0")}`, tipo: x.tipo, modelo: "", fabricante: "", tag: x.tag, ip: "", pav: "", status: x.status || "", obs: x.obs || "", origem: "criado pelo catálogo em " + agora() + " por " + meuNome(), alteradoEm: agora(), alteradoPor: meuNome() };
+                if (x.tipoCat) it.tipoCat = x.tipoCat;
+                if (x.eqDiario) it.eqDiario = x.eqDiario;
+                doc.itens = [...(doc.itens || []), it];
+                n++;
+              }
+              S.inv[sis] = doc;
+              garanteAces(sis);
+              if (!(await salvaSistema(sis, true))) throw new Error("não consegui gravar " + sis);
+            }
+            audita("criou dispositivos pelo catálogo", "inventario", cli.id, `${cli.unidade || ""} · ${n} dispositivo(s) · ${sists.join(", ")}`);
+            S.criaCat = null;
+            S.aba = sists[0];
+            toast(`${n} dispositivo(s) criados. Complete IP, pavimento e status na ficha ou na planilha exportada.`);
+            render();
+          } catch (e) {
+            console.error(e);
+            el.disabled = false;
+            toast("Não consegui criar: " + (e.code === "permission-denied" ? "sem permissão" : e.code || e.message));
+          }
+        },
         novoItem(el) {
           S.novo = { sis: (el && el.dataset.sis) || (S.inv[S.aba] ? S.aba : Object.keys(S.inv)[0] || "") };
           render();
@@ -3208,6 +3327,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       document.addEventListener("toggle", (ev) => {
         if (ev.target.matches && ev.target.matches('details[data-a="centT"]')) S.centAb = ev.target.open;
         if (ev.target.matches && ev.target.matches("details[data-g]")) (S.grAb = S.grAb || {})[ev.target.dataset.g] = ev.target.open;
+        if (ev.target.matches && ev.target.matches("details[data-cab]") && S.criaCat) S.criaCat.ab[ev.target.dataset.cab] = ev.target.open;
       }, true);
       let tBusca = null;
       document.addEventListener("input", (ev) => {
@@ -3219,6 +3339,19 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (ev.target.dataset && ev.target.dataset.novopf !== undefined) {
           S.catEd = S.catEd || { mapa: {}, selecao: {}, pp: {} };
           (S.catEd.novoPf = S.catEd.novoPf || {})[ev.target.dataset.novopf] = ev.target.value;
+          return;
+        }
+        if (ev.target.dataset && ev.target.dataset.cc && S.criaCat) {
+          const d = ev.target.dataset;
+          if (d.cc === "eq") S.criaCat.eqs[d.t] = ev.target.checked;
+          else S.criaCat[d.cc][d.t] = ev.target.value;
+          const bt = document.querySelector("[data-a=criaCatSalva]");
+          if (bt) {
+            const C = S.criaCat,
+              tot = Object.values(C.qtd).reduce((a, n) => a + (+n || 0), 0) + Object.values(C.eqs).filter(Boolean).length;
+            bt.textContent = `Criar ${tot} dispositivo(s)`;
+            bt.disabled = !tot;
+          }
           return;
         }
         if (ev.target.dataset && ev.target.dataset.cap) {
