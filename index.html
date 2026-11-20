@@ -1679,6 +1679,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const t = [
           ["home", "Início"],
           ["clientes", "Clientes"],
+          ["inventario", "Inventário"],
           ["catalogo", "Catálogo"],
           ...(pode("relatorios") ? [["relatorios", "Relatórios"]] : []),
           ...(pode("simulados") || pode("simulado.fazer") ? [["simulados", "Simulados"]] : []),
@@ -4835,6 +4836,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (!b) return;
         if (b.dataset.v) {
           flushAll();
+          // Inventário é uma página à parte (inventario.html), como o simulado: abre na mesma aba, com a mesma sessão
+          if (b.dataset.v === "inventario") return void (location.href = "inventario.html");
           const fechando = S.menuAb && !!b.closest("nav");
           S.menuAb = false;
           if (b.dataset.v === "catalogo") {

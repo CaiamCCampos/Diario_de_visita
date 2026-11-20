@@ -1,0 +1,2265 @@
+<!doctype html>
+<html lang="pt-BR" translate="no">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="google" content="notranslate" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Inventário · Diário Técnico</title>
+    <meta name="theme-color" content="#c81e2c" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Diário" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icon-180.png" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <!-- SheetJS: lê a planilha antiga (.xlsx) no navegador e gera o Excel exportado -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="config.js"></script>
+    <style>
+      :root {
+        --r: #c81e2c;
+        --rd: #8f0f19;
+        --l: #e6e0e0;
+        --d: #7a6d6d;
+        --ok: #1f8a3b;
+        --warn: #c47a00;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font:
+          15px/1.4 system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+        color: #201616;
+        background: #fff;
+      }
+      .app {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 10px 10px 80px;
+      }
+      header {
+        border: 1px solid var(--l);
+        border-top: 4px solid var(--r);
+        border-radius: 10px;
+        padding: 10px 14px;
+        margin-bottom: 10px;
+      }
+      .hrow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .logo {
+        height: 30px;
+        max-width: 60vw;
+      }
+      .htop {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .htop .logo {
+        min-width: 0;
+        max-width: calc(100% - 90px);
+        object-fit: contain;
+        object-position: left center;
+      }
+      .hsair {
+        flex: 0 0 auto;
+        margin: 0;
+      }
+      .hr {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .hr .chipuser {
+        border-radius: 14px;
+        white-space: normal;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .chip {
+        font-size: 11px;
+        border: 1px solid var(--l);
+        border-radius: 20px;
+        padding: 3px 9px;
+        color: var(--d);
+        white-space: nowrap;
+        display: inline-block;
+      }
+      .chip.ok {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+      .chip.warn {
+        color: var(--warn);
+        border-color: var(--warn);
+      }
+      .chip.red {
+        color: var(--r);
+        border-color: var(--r);
+      }
+      nav,
+      .tabs {
+        display: flex;
+        gap: 2px;
+        border-bottom: 1px solid var(--l);
+        margin-bottom: 12px;
+        overflow-x: auto;
+      }
+      nav button,
+      .tabs button {
+        background: none;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        padding: 10px 14px;
+        cursor: pointer;
+        color: var(--d);
+        font: inherit;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      nav button.on,
+      .tabs button.on {
+        color: var(--r);
+        border-color: var(--r);
+      }
+      .card {
+        border: 1px solid var(--l);
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 12px;
+      }
+      .card h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--r);
+        margin: 0 0 10px;
+      }
+      h3 {
+        margin: 0 0 6px;
+        font-size: 17px;
+      }
+      .g {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0 10px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: var(--d);
+        margin: 8px 0 3px;
+      }
+      input,
+      select,
+      textarea {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid var(--l);
+        border-radius: 6px;
+        font: inherit;
+        background: #fbfbfb;
+      }
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: 2px solid var(--r);
+        outline-offset: 1px;
+      }
+      textarea {
+        resize: vertical;
+      }
+      .g > *,
+      .row > * {
+        min-width: 0;
+      }
+      input[type="date"],
+      input[type="time"] {
+        display: block;
+        min-width: 0;
+        max-width: 100%;
+        -webkit-appearance: none;
+        appearance: none;
+        min-height: 43px;
+        line-height: 1.2;
+      }
+      input[type="date"]::-webkit-date-and-time-value,
+      input[type="time"]::-webkit-date-and-time-value {
+        text-align: left;
+        min-width: 0;
+      }
+      .top .nm {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .top {
+        flex-wrap: wrap;
+      }
+      .li .t {
+        flex-wrap: wrap;
+      }
+      .b {
+        background: var(--r);
+        color: #fff;
+        border: 0;
+        border-radius: 6px;
+        padding: 11px 15px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        margin: 6px 6px 0 0;
+      }
+      .b:hover {
+        background: var(--rd);
+      }
+      .b.o {
+        background: #fff;
+        color: #201616;
+        border: 1px solid var(--l);
+      }
+      .b.o:hover {
+        background: #f6f2f2;
+      }
+      .b.s {
+        padding: 7px 10px;
+        font-size: 12.5px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: flex-end;
+      }
+      .row > * {
+        flex: 1;
+        min-width: 140px;
+      }
+      .eq {
+        border: 1px solid var(--l);
+        border-left: 3px solid var(--r);
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin: 10px 0;
+      }
+      .k {
+        display: flex;
+        gap: 9px;
+        align-items: center;
+        margin: 6px 0;
+        color: #201616;
+        font-size: 14px;
+      }
+      .k input {
+        width: auto;
+        transform: scale(1.2);
+      }
+      small,
+      .sm {
+        color: var(--d);
+        font-size: 12.5px;
+      }
+      .li {
+        border: 1px solid var(--l);
+        border-radius: 8px;
+        padding: 11px 13px;
+        margin: 8px 0;
+        cursor: pointer;
+      }
+      .li:hover {
+        background: #faf6f6;
+      }
+      .li .t {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: center;
+      }
+      .note {
+        background: #fff3b0;
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin: 8px 0;
+        font-size: 13px;
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+      .center {
+        text-align: center;
+        padding: 40px 10px;
+        color: var(--d);
+      }
+      .login {
+        max-width: 380px;
+        margin: 40px auto;
+      }
+      .login img {
+        max-width: 100%;
+      }
+      .err {
+        color: var(--r);
+        font-size: 13px;
+        min-height: 18px;
+        margin-top: 8px;
+      }
+      details summary {
+        cursor: pointer;
+        color: var(--r);
+        font-size: 13px;
+        margin: 8px 0;
+      }
+      #toast {
+        position: fixed;
+        left: 50%;
+        bottom: 18px;
+        transform: translateX(-50%);
+        background: #201616;
+        color: #fff;
+        padding: 10px 16px;
+        border-radius: 8px;
+        font-size: 14px;
+        display: none;
+        z-index: 9;
+        max-width: 90vw;
+      }
+      details.eq > summary {
+        font-size: 15px;
+        margin: 0;
+      }
+      details.eq > summary.sp {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      details.eq > summary.sp .chip {
+        margin-left: auto;
+        flex: 0 0 auto;
+      }
+      .rd {
+        color: var(--r);
+      }
+      .b.am,
+      .chip.am {
+        color: #8a5a00;
+        border-color: #c47a00;
+        background: #fff6e0;
+      }
+      fieldset.ro {
+        border: 0;
+        padding: 0;
+        margin: 0;
+        min-width: 0;
+      }
+      .ro .b,
+      .ro summary ~ .b {
+        display: none;
+      }
+      @media (max-width: 640px) {
+        .g {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ===== LAYOUT: cabeçalho escuro (logo branca), sistema centralizado e fundo no computador ===== */
+      header {
+        background: #18222e;
+        border: 0;
+        border-top: 4px solid var(--r);
+        border-radius: 12px;
+        color: #fff;
+      }
+      .htop .logo {
+        height: 60px;
+        max-width: calc(100% - 90px);
+      }
+      header .chip {
+        color: #d7dde5;
+        border-color: rgba(255, 255, 255, 0.35);
+        background: transparent;
+      }
+      header .chip.ok {
+        color: #6fd48b;
+        border-color: #6fd48b;
+      }
+      header .chip.warn {
+        color: #ffc15a;
+        border-color: #ffc15a;
+      }
+      header .b.o {
+        background: transparent;
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.5);
+      }
+      .login img {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        background: #18222e;
+        border-radius: 10px;
+        padding: 14px 18px;
+        margin-bottom: 12px;
+      }
+      @media (min-width: 900px) {
+        body {
+          background: #0d2a4d url(fundo.jpg) center / cover fixed no-repeat;
+          min-height: 100vh;
+        }
+        .app {
+          margin: 28px auto;
+          max-width: 1000px;
+          padding: 18px 22px 40px;
+          border-radius: 16px;
+          background: #fff;
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+        .app:has(> .login) {
+          background: transparent;
+          box-shadow: none;
+        }
+        .login {
+          margin-top: 10vh;
+          background: #fff;
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+      }
+    /* ===== Foto no fundo do cabeçalho e do logo do login (fundo-topo.jpg) ===== */
+header{background:linear-gradient(rgba(10,25,45,.45),rgba(10,25,45,.45)),url(fundo.jpg) center 50%/cover no-repeat !important;border-top:4px solid var(--r)}
+.htop{padding-top:6px;padding-bottom:6px}
+.htop .logo{height:64px}
+@media (min-width:900px){
+ body{background:#0d2a4d url(fundo.jpg) center/cover fixed no-repeat}
+ 
+ .htop .logo{height:84px}
+ .login{margin-top:10vh}
+ .login img{background:linear-gradient(rgba(10,25,45,.45),rgba(10,25,45,.45)),url(fundo.jpg) center 50%/cover no-repeat !important;border-radius:10px;padding:22px 30px;box-sizing:border-box}
+}
+.login img{background:linear-gradient(rgba(10,25,45,.45),rgba(10,25,45,.45)),url(fundo.jpg) center 50%/cover no-repeat !important}
+
+/* ===== Tela fixa SÓ NO COMPUTADOR (a partir de 900 px): a página não rola; o card principal tem altura fixa
+   e o conteúdo rola dentro dele. No celular a página rola normalmente, como antes. ===== */
+@media (min-width: 900px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  .app {
+    height: calc(100dvh - 40px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-sizing: border-box;
+    margin: 20px auto;
+    padding-bottom: 18px;
+  }
+  .app > header,
+  .app > nav,
+  .app > .card {
+    flex: none;
+  }
+  .app > .card.login {
+    max-height: 100%;
+    overflow-y: auto;
+  }
+  .painel {
+    --p: 0.8;
+    flex: 0 1 auto;
+    min-height: 0;
+    height: calc(var(--p) * 100dvh);
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    border: 1px solid var(--l);
+    border-radius: 14px;
+    background: #fbf9f9;
+    padding: 10px;
+    margin-top: 8px;
+  }
+  /* altura de cada tela, em % da altura da tela do aparelho */
+  .painel[data-tela="home"] { --p: 0.62; }
+  .painel[data-tela="clientes"] { --p: 0.72; }
+  .painel[data-tela="cliente"] { --p: 0.85; }
+  .painel[data-tela="visita"] { --p: 0.88; }
+  .painel[data-tela="catalogo"] { --p: 0.78; }
+  .painel[data-tela="relatorios"] { --p: 0.85; }
+  .painel[data-tela="simulados"] { --p: 0.85; }
+  .painel[data-tela="concluidas"] { --p: 0.85; }
+  .painel[data-tela="usuarios"] { --p: 0.8; }
+  .painel[data-tela="config"] { --p: 0.55; }
+  /* cliente e visita: topo parado + card auxiliar que leva o conteúdo */
+  .painel[data-tela="cliente"],
+  .painel[data-tela="visita"] {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 10px 0;
+  }
+  .painel[data-tela="cliente"] > .card,
+  .painel[data-tela="cliente"] > .tabs,
+  .painel[data-tela="visita"] > .card {
+    flex: none;
+  }
+  .painel[data-tela="cliente"] > .tabs { margin: 6px 0; }
+  .painel[data-tela="cliente"] > .card,
+  .painel[data-tela="visita"] > .card { padding: 8px 12px; }
+  .painel[data-tela="cliente"] > .card h3,
+  .painel[data-tela="visita"] > .card h3 { margin: 4px 0 0; font-size: 17px; }
+  .painel[data-tela="cliente"] > .card .b {
+    display: inline-block;
+    width: auto;
+    padding: 8px 12px;
+    margin: 6px 6px 0 0;
+    font-size: 14px;
+  }
+  .aux {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: 0 -4px;
+    padding: 10px 6px 12px;
+    background: #fff;
+    border: 1px solid var(--l);
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.06);
+  }
+  .aux > .card { box-shadow: none; }
+  .aux { scrollbar-width: none; -ms-overflow-style: none; }
+  .aux::-webkit-scrollbar { display: none; width: 0; height: 0; }
+}
+
+/* ===== Computador: foto em alta qualidade (fundoh.png). Se o arquivo não existir, usa o fundo.jpg ===== */
+@media (min-width: 900px) {
+  body {
+    background:
+      url(fundoh.png) center / cover fixed no-repeat,
+      #0d2a4d url(fundo.jpg) center / cover fixed no-repeat;
+  }
+  header {
+    background:
+      linear-gradient(rgba(10, 25, 45, 0.45), rgba(10, 25, 45, 0.45)),
+      url(fundoh.png) center 50% / cover no-repeat,
+      url(fundo.jpg) center 50% / cover no-repeat !important;
+  }
+  .login img {
+    background:
+      linear-gradient(rgba(10, 25, 45, 0.45), rgba(10, 25, 45, 0.45)),
+      url(fundoh.png) center 50% / cover no-repeat,
+      url(fundo.jpg) center 50% / cover no-repeat !important;
+  }
+}
+
+/* Celular: foto no fundo e sistema numa caixa branca */
+@media (max-width: 899px) {
+  body { background: #0d2a4d url(fundo.jpg) center / cover fixed no-repeat; }
+  .app { width: calc(100% - 20px); margin: 10px auto; padding: 10px 10px 20px; background: #fff; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+  .app:has(> .login) { background: transparent; box-shadow: none; }
+}
+
+/* Fundos brancos e menu de navegação arredondado */
+nav, .tabs { background: #fff; border: 1px solid var(--l); border-radius: 14px; padding: 0 6px; }
+nav button, .tabs button { border-radius: 10px 10px 0 0; }
+.card { background: #fff; }
+label { background: #fff; }
+@media (max-width: 899px) {
+  label { display: block; padding: 2px 4px; border-radius: 6px; }
+}
+
+/* setas iguais em todos os menus (o flex do summary.sp escondia a seta nativa) */
+details.eq > summary { list-style: none; }
+details.eq > summary::-webkit-details-marker { display: none; }
+details.eq > summary::before { content: "\25B6"; display: inline-block; flex: 0 0 auto; font-size: 10px; line-height: 1; color: var(--r); margin-right: 8px; transition: transform .15s; }
+details.eq[open] > summary::before { transform: rotate(90deg); }
+details.eq > summary.sp::before { margin-right: 0; }
+details.eq > summary .sm.sub { display: block; margin: 3px 0 0 18px; }
+/* celular: o nome ocupa a linha inteira (em vermelho) e as etiquetas ficam embaixo */
+@media (max-width: 899px) {
+  .li > .t { flex-wrap: wrap; justify-content: flex-start; align-items: flex-start; row-gap: 6px; }
+  .li > .t > b { flex: 1 1 100%; min-width: 0; color: var(--r); line-height: 1.25; overflow-wrap: anywhere; }
+  .li > .t > span { display: flex; flex-wrap: wrap; gap: 6px; }
+  .li > .sm { margin-top: 6px; }
+  /* menu dentro do cartão: sem caixa extra */
+  .card > details.eq { border: 0; border-radius: 0; padding: 0; margin: 0; }
+  .card > details.eq > summary { padding: 2px 0; }
+}
+
+/* ===== NOVO LAYOUT: menu lateral fixo (computador) e hambúrguer (celular); cabeçalho em uma linha ===== */
+header.hnew{display:flex;align-items:center;gap:12px;flex-wrap:nowrap;padding:6px 14px;margin-bottom:8px}
+header.hnew .logo{height:46px;max-width:none;flex:0 0 auto;min-width:0}
+header.hnew .hdir{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px;min-width:0;max-width:78%}
+header.hnew .hinfo{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;justify-content:flex-end}
+header.hnew .hsair{margin:0;flex:0 0 auto}
+.heq{display:inline-flex;align-items:center;gap:6px;margin:0;color:#fff;font-size:12px;background:transparent !important;padding:0}
+.heq select,#eqsel{background:rgba(255,255,255,.6) !important;color:#000 !important;border:1px solid rgba(255,255,255,.7)}
+.heq select{width:auto;min-width:120px;margin:0;padding:4px 6px;font-size:13px}
+.heq select option,#eqsel option{color:#000;background:#fff}
+.burger{display:none;background:transparent;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:8px;font-size:22px;line-height:1;padding:6px 12px;cursor:pointer;flex:0 0 auto}
+.mbk{display:none}
+.nuser{margin-top:auto;padding:10px 12px 6px;border-top:1px solid var(--l);display:flex;flex-direction:column;gap:2px;font-size:12px;color:#666;position:sticky;bottom:0;background:#fff;overflow-wrap:anywhere}
+.nuser .nnome{font-size:14px;color:#222}
+.atalhos{display:flex;gap:8px;flex-wrap:wrap}.atalhos .b{margin:0;width:auto;flex:1 1 200px}
+.shell{display:block}
+.card.cinl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cinl .top{flex:0 0 auto;gap:8px}
+.cinl h3{margin:0 !important;flex:1 1 180px;min-width:0}
+.cinl .cacts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:0 1 auto}
+.cinl .cacts .b{width:auto;margin:0;padding:8px 12px;font-size:14px}
+.cinl .cacts .note,.cinl .cacts p{flex:1 1 100%;margin:0}
+details.hist .hl{padding:6px 0;border-top:1px solid var(--l)}
+details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
+@media (min-width:900px){
+  .app{max-width:1320px !important;width:calc(100% - 40px);padding:12px 16px 16px !important}
+  .shell{flex:1 1 auto;min-height:0;display:flex !important;gap:12px}
+  .shell > nav{flex:0 0 176px;flex-direction:column;overflow-y:auto;margin:0;padding:8px;border-radius:14px;align-self:stretch;gap:4px;background:#fff;border:1px solid var(--l)}
+  .shell > nav button{border:0;border-left:3px solid transparent;border-radius:8px;text-align:left;padding:11px 12px}
+  .shell > nav button.on{background:#fdf0f0;border-left-color:var(--r);color:var(--r)}
+  .shell > nav button:hover{background:#f6f6f6}
+  .main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column}
+  .main > .painel{flex:1 1 auto !important;height:auto !important;margin-top:0 !important}
+  header.hnew .logo{height:56px}
+}
+@media (max-width:899px){
+  .burger{display:inline-block}
+  header.hnew{flex-wrap:wrap;gap:8px}
+  header.hnew .logo{height:38px}
+  header.hnew .hdir{max-width:100%;flex:1 1 auto}
+  .shell > nav{position:fixed;left:0;top:0;bottom:0;width:78%;max-width:300px;z-index:60;flex-direction:column;margin:0;border-radius:0 14px 14px 0;padding:14px 8px;overflow-y:auto;transform:translateX(-105%);transition:transform .3s cubic-bezier(.22,.8,.3,1);will-change:transform;box-shadow:0 0 30px rgba(0,0,0,.4);background:#fff}
+  .shell > nav.open{transform:none}
+  .shell > nav button{border:0;border-left:3px solid transparent;text-align:left;padding:14px 12px;border-radius:8px}
+  .shell > nav button.on{background:#fdf0f0;border-left-color:var(--r);color:var(--r)}
+  .mbk{display:block;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:55;opacity:0;pointer-events:none;transition:opacity .3s ease}
+  .mbk.on{opacity:1;pointer-events:auto}
+  .shell > nav{position:fixed}
+}
+
+/* ===================== INVENTÁRIO (estilos próprios desta página) ===================== */
+.painel[data-tela="lista"],.painel[data-tela="importar"],.painel[data-tela="cliente"]{--p:.85}
+.painel[data-tela="cliente"] > .kpis{flex:none;margin:4px 0}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin:8px 0}
+.kpi{border:1px solid var(--l);border-top:3px solid var(--d);border-radius:10px;padding:8px 10px;background:#fff}
+.kpi .n{font-size:22px;font-weight:700;line-height:1.1}
+.kpi .r{font-size:11.5px;color:var(--d)}
+.kpi.ok{border-top-color:var(--ok)}.kpi.ok .n{color:var(--ok)}
+.kpi.am{border-top-color:var(--warn)}.kpi.am .n{color:var(--warn)}
+.kpi.red{border-top-color:var(--r)}.kpi.red .n{color:var(--r)}
+.filtros{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:6px 0 4px}
+.filtros > *{flex:1 1 150px;min-width:0}
+.filtros > .busca{flex:3 1 240px}
+.filtros label{margin-top:0}
+.st{display:inline-block;font-size:11px;font-weight:700;border-radius:20px;padding:2px 8px;white-space:nowrap;border:1px solid transparent}
+.st.ONLINE,.st.OPERANDO{background:#e3f4e7;color:#1f6b33;border-color:#a9dcb5}
+.st.VERIFICAR{background:#fff4d6;color:#7a5600;border-color:#f0d58c}
+.st.FALHA,.st.OFFLINE{background:#fde3e3;color:#9c0006;border-color:#f3aaaa}
+.st.VAZIO,.st.x{background:#eee;color:#666;border-color:#ddd}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{position:sticky;top:0;background:#2e2f33;color:#fff;text-align:left;font-size:12px;font-weight:600;padding:7px 8px;z-index:1}
+.tbl td{border-bottom:1px solid var(--l);padding:7px 8px;vertical-align:top;overflow-wrap:break-word;word-break:normal}
+.tbl td[data-l="Tipo"],.tbl td[data-l="Status"],.tbl td[data-l="Pavimento"]{white-space:nowrap}
+.tbl tr.it{cursor:pointer}
+.tbl tr.it:hover td{background:#faf6f6}
+.tbl tr.it.on td{background:#fdf0f0}
+.tbl tr.it.al td:first-child{box-shadow:inset 3px 0 0 #ed7d31}
+.tbl tr.det > td{background:#fffdfb;padding:10px 12px 14px}
+.tbl .mono{font-family:ui-monospace,Consolas,monospace;font-size:12.5px}
+.tblw{overflow-x:auto;border:1px solid var(--l);border-radius:10px;background:#fff}
+.tag-al{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;color:#843c0c;background:#fce4d6;border-radius:10px;padding:1px 6px}
+.senha{display:flex;gap:6px;align-items:center}
+.senha input{flex:1 1 auto}
+.senha .b{margin:0;flex:0 0 auto}
+.ver{font-size:12px;color:var(--ok)}
+.ver.nao{color:var(--d)}
+.prev{border:1px solid var(--l);border-radius:10px;padding:10px 12px;margin:8px 0;background:#fff}
+.prev table{width:100%;border-collapse:collapse;font-size:13px}
+.prev td,.prev th{border-bottom:1px solid var(--l);padding:5px 6px;text-align:left}
+.al{border:1px solid var(--l);border-left:4px solid var(--warn);border-radius:8px;padding:9px 11px;margin:8px 0;background:#fff}
+.al.NOK{border-left-color:var(--r)}
+.al.OK{border-left-color:var(--ok);opacity:.65}
+.al .t{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.al .ids a{color:var(--r);cursor:pointer;text-decoration:underline;margin-right:6px;font-size:12.5px}
+.sitsel{width:auto;padding:5px 8px;font-weight:700}
+.mais{display:block;margin:10px auto}
+.cent{border:1px solid var(--l);border-radius:8px;padding:8px 10px;margin:6px 0;background:#fff}
+.cent table{width:100%;border-collapse:collapse;font-size:12.5px}
+.cent td{border-bottom:1px solid #f0ecec;padding:4px 6px}
+.cent td:first-child{color:var(--d);width:45%}
+@media (max-width:899px){
+  .tbl thead{display:none}
+  .tbl,.tbl tbody,.tbl tr,.tbl td{display:block;width:100%}
+  .tbl tr.it{border:1px solid var(--l);border-radius:8px;margin:8px 0;padding:6px 8px;background:#fff}
+  .tbl tr.it td{border:0;padding:2px 0}
+  .tbl tr.it td[data-l]::before{content:attr(data-l) ": ";color:var(--d);font-size:11.5px}
+  .tbl tr.it td.c-tag{font-weight:700;color:var(--r)}
+  .tbl tr.det{border:1px solid var(--r);border-radius:8px;margin:-6px 0 10px}
+  .tbl tr.det > td{border:0}
+}
+</style>
+  </head>
+  <body>
+    <div id="app" class="app"></div>
+    <div id="toast"></div>
+    <script>
+      "use strict";
+      /* ==================================================================
+   INVENTÁRIO DE DISPOSITIVOS (arquivo à parte, igual ao simulado)
+   - usa o mesmo Firebase, o mesmo login e o mesmo visual do diário (index.html)
+   - não altera nada no diário: só lê clientes, equipes, usuários e configurações
+   Coleções novas no Firestore:
+     inventario         {clienteId}__{SISTEMA}: dispositivos de um sistema (sem senhas)
+     inventarioAcessos  {clienteId}__{SISTEMA}: logins e senhas daquele sistema (separados, para as regras protegerem)
+     inventarioMeta     {clienteId}: versão, arquivo de origem, decisões dos alertas, legenda e resumo
+   ================================================================== */
+
+      /* ==================================================================
+   1. UTILIDADES
+   ================================================================== */
+      const FBCFG = window.FIREBASE_CONFIG || {};
+      const LOCAL = new URLSearchParams(location.search).has("local"); // ?local=1 → testa sem Firebase (dados só neste navegador)
+      const USE_FB = !LOCAL && !!FBCFG.apiKey && !String(FBCFG.apiKey).startsWith("SUA");
+      const $ = (s, r = document) => r.querySelector(s);
+      const pad = (n) => String(n).padStart(2, "0");
+      const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      const clone = (o) => JSON.parse(JSON.stringify(o));
+      const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      const hoje = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      };
+      const bd = (iso) => (iso ? String(iso).slice(0, 10).split("-").reverse().join("/") : "");
+      const agora = () => {
+        const d = new Date();
+        return `${bd(hoje())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      };
+      const plural = (n, s = "dispositivo", p = "dispositivos") => `${n} ${n === 1 ? s : p}`;
+      // data e hora da confirmação (ex.: 2026-11-20T07:55) → 20/11/2026 07:55
+      const agoraIso = () => {
+        const d = new Date();
+        return `${hoje()}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      };
+      const dh = (iso) => (iso ? bd(iso) + (String(iso).length > 10 ? " " + String(iso).slice(11, 16) : "") : "");
+      const semAcento = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+      function toast(msg) {
+        const t = $("#toast");
+        t.textContent = msg;
+        t.style.display = "block";
+        clearTimeout(toast.t);
+        toast.t = setTimeout(() => (t.style.display = "none"), 3200);
+      }
+
+      /* ==================================================================
+   2. BANCO DE DADOS (Firebase ou modo local de teste)
+   ================================================================== */
+      let DB;
+      function makeLocalDB() {
+        const k = (c) => "inv-local:" + c;
+        const read = (c) => {
+          try {
+            return JSON.parse(localStorage.getItem(k(c)) || "{}");
+          } catch (e) {
+            return {};
+          }
+        };
+        const write = (c, o) => localStorage.setItem(k(c), JSON.stringify(o));
+        const subs = [];
+        const match = (d, f, v) => {
+          if (!f) return true;
+          const w = typeof f === "string" ? { [f]: v } : f;
+          return Object.entries(w).every(([a, b]) => d[a] === b);
+        };
+        const rows = (c, f, v) => Object.values(read(c)).filter((d) => match(d, f, v)).map(clone);
+        const notify = (c) => subs.filter((s) => s.col === c).forEach((s) => s.fire());
+        return {
+          mode: "local",
+          async get(c, id) {
+            const d = read(c)[id];
+            return d ? clone(d) : null;
+          },
+          async set(c, id, data) {
+            const o = read(c);
+            o[id] = clone(data);
+            write(c, o);
+            notify(c);
+          },
+          async del(c, id) {
+            const o = read(c);
+            delete o[id];
+            write(c, o);
+            notify(c);
+          },
+          async list(c, f, v) {
+            return rows(c, f, v);
+          },
+          listen(c, f, v, cb) {
+            const s = { col: c, fire: () => cb(rows(c, f, v)) };
+            subs.push(s);
+            s.fire();
+            return () => {
+              const i = subs.indexOf(s);
+              if (i >= 0) subs.splice(i, 1);
+            };
+          },
+        };
+      }
+      async function makeFirebaseDB() {
+        const base = "https://www.gstatic.com/firebasejs/10.13.2/";
+        const [appM, fsM, authM] = await Promise.all([import(base + "firebase-app.js"), import(base + "firebase-firestore.js"), import(base + "firebase-auth.js")]);
+        const app = appM.initializeApp(FBCFG);
+        if (window.FIREBASE_APPCHECK_KEY) {
+          try {
+            const acM = await import(base + "firebase-app-check.js");
+            acM.initializeAppCheck(app, {
+              provider:
+                window.FIREBASE_APPCHECK_TIPO === "enterprise"
+                  ? new acM.ReCaptchaEnterpriseProvider(window.FIREBASE_APPCHECK_KEY)
+                  : new acM.ReCaptchaV3Provider(window.FIREBASE_APPCHECK_KEY),
+              isTokenAutoRefreshEnabled: true,
+            });
+          } catch (e) {
+            console.warn("App Check não iniciou", e);
+          }
+        }
+        let db;
+        try {
+          db = fsM.initializeFirestore(app, { localCache: fsM.persistentLocalCache({ tabManager: fsM.persistentMultipleTabManager() }), experimentalAutoDetectLongPolling: true });
+        } catch (e) {
+          db = fsM.getFirestore(app);
+        }
+        const auth = authM.getAuth(app);
+        const q = (c, f, v) => {
+          const col = fsM.collection(db, c),
+            w = !f ? [] : typeof f === "string" ? [[f, v]] : Object.entries(f);
+          return w.length ? fsM.query(col, ...w.map(([a, b]) => fsM.where(a, "==", b))) : col;
+        };
+        return {
+          mode: "firebase",
+          auth,
+          authM,
+          async get(c, id) {
+            const s = await fsM.getDoc(fsM.doc(db, c, id));
+            return s.exists() ? s.data() : null;
+          },
+          async set(c, id, data) {
+            await fsM.setDoc(fsM.doc(db, c, id), clone(data));
+          },
+          async del(c, id) {
+            await fsM.deleteDoc(fsM.doc(db, c, id));
+          },
+          async list(c, f, v) {
+            const s = await fsM.getDocs(q(c, f, v));
+            return s.docs.map((d) => d.data());
+          },
+          listen(c, f, v, cb) {
+            return fsM.onSnapshot(
+              q(c, f, v),
+              (s) => cb(s.docs.map((d) => d.data())),
+              (e) => {
+                console.warn("leitura", c, e);
+                toast(e.code === "permission-denied" ? `Sem permissão para ler "${c}". Confira as regras do Firestore.` : "Falha de conexão ao ler " + c);
+              },
+            );
+          },
+        };
+      }
+
+      /* registro de auditoria (mesma coleção do diário) */
+      function audita(acao, col, docId, det) {
+        if (!S.user || !S.me || DB.mode !== "firebase") return;
+        const d = new Date(),
+          id = uid();
+        DB.set("auditoria", id, {
+          id,
+          uid: S.user.uid,
+          nome: S.me.nome || "",
+          email: S.user.email || "",
+          papel: S.me.papel || "",
+          equipeId: S.me.equipeId || "",
+          acao,
+          col,
+          docId: docId || "",
+          det: String(det || "").slice(0, 300),
+          ts: d.getTime(),
+          dia: hoje(),
+          hora: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+        }).catch((e) => console.warn("auditoria", e.code || e.message));
+      }
+
+      /* gravação com indicador "Salvando…/Salvo" */
+      let gravando = 0;
+      async function grava(c, id, data) {
+        gravando++;
+        showSave();
+        try {
+          await DB.set(c, id, data);
+          return true;
+        } catch (e) {
+          console.error(e);
+          toast(e.code === "permission-denied" ? "Sem permissão para salvar. Avise o administrador (regras do Firestore)." : "Não consegui salvar: " + (e.code || e.message));
+          return false;
+        } finally {
+          gravando--;
+          showSave();
+        }
+      }
+      function showSave() {
+        const el = $("#savestat");
+        if (!el) return;
+        el.textContent = !navigator.onLine ? "Sem internet" : gravando ? "Salvando…" : "Salvo";
+        el.className = "chip " + (!navigator.onLine || gravando ? "warn" : "ok");
+      }
+      window.addEventListener("online", showSave);
+      window.addEventListener("offline", showSave);
+
+      /* ==================================================================
+   3. ESTADO, PERFIS E PERMISSÕES
+   ================================================================== */
+      const S = {
+        authChecked: false,
+        user: null,
+        me: null,
+        ready: false,
+        fatal: "",
+        semAcesso: "",
+        view: "lista",
+        menuAb: false,
+        cfg: {},
+        eq: [],
+        eqSel: "",
+        clientes: [],
+        metas: [],
+        busca: "",
+        cliId: "",
+        aba: "",
+        inv: {}, // sistema -> documento do inventário
+        aces: {}, // sistema -> documento de acessos
+        meta: null,
+        fBusca: "",
+        fPav: "",
+        fSt: "",
+        fAl: false,
+        lim: 200,
+        aberto: "",
+        vistas: {}, // senhas reveladas (id do campo)
+        imp: { cliId: "", nome: "", res: null, erro: "", salvando: false },
+      };
+      const PAPEIS = { admin: "Administrador", supervisor: "Supervisor", tecnico: "Técnico" };
+      // admin: tudo (inclusive subir planilhas, criar e excluir); supervisor: altera os dispositivos que já existem;
+      // técnico: vê, confirma o acesso e corrige login/senha.
+      const PERM = {
+        admin: ["*"],
+        supervisor: ["inv.editar", "inv.acesso", "inv.confirmar", "inv.alertas", "inv.legenda"],
+        tecnico: ["inv.acesso", "inv.confirmar"],
+      };
+      const pode = (a) => {
+        const p = PERM[(S.me || {}).papel] || [];
+        return p.includes("*") || p.includes(a);
+      };
+      const ehAdmin = () => (S.me || {}).papel === "admin";
+      const eqNome = (id) => (S.eq.find((e) => e.id === id) || {}).nome || "(sem equipe)";
+      const eqAtiva = () => (ehAdmin() ? S.eqSel : S.me.equipeId);
+      const filtro = (o = {}) => {
+        const e = eqAtiva();
+        return e ? { ...o, equipeId: e } : o;
+      };
+      const meuNome = () => (S.me && S.me.nome) || (S.user && S.user.email) || "";
+      const cliNome = (id) => (S.clientes.find((c) => c.id === id) || {}).unidade || id;
+
+      /* ==================================================================
+   4. REGRAS DO INVENTÁRIO (sistemas, colunas, padronização)
+   ================================================================== */
+      const SISTEMAS = ["CFTV", "SCA", "SAI", "SDAI", "AUTOMAÇÃO", "SONORIZAÇÃO"];
+      const SISTEMAS_ABA = { CFTV: "CFTV", SCA: "SCA", SAI: "SAI", SDAI: "SDAI", "AUTOMAÇÃO": "AUTOMAÇÃO", AUTOMACAO: "AUTOMAÇÃO", "SONORIZAÇÃO": "SONORIZAÇÃO", SONORIZACAO: "SONORIZAÇÃO" };
+      const CODIGO = { "AUTOMAÇÃO": "AUT", "SONORIZAÇÃO": "SON" };
+      const docId = (cliId, sis) => `${cliId}__${semAcento(sis).toUpperCase()}`;
+      const SINONIMOS = {
+        "TIPO DO EQUIPAMENTO": "tipo",
+        "TIPO DE EQUIPAMENTO": "tipo",
+        TIPO: "tipo",
+        MODELO: "modelo",
+        FABRICANTE: "fabricante",
+        TAG: "tag",
+        IP: "ip",
+        PAV: "pav",
+        PAVIMENTO: "pav",
+        NVR: "nvr",
+        DVR: "nvr",
+        CANAL: "canal",
+        "LAÇO": "laco",
+        LACO: "laco",
+        STATUS: "status",
+        LOGIN: "login",
+        "LOGIN/MASTER": "login",
+        SENHA: "senha",
+        "SENHA/MASTER": "senha",
+        "LOGIN/REMOTO": "login2",
+        "SENHA/ACESSO REMOTO": "senha2",
+        "SENHA/REMOTO": "senha2",
+        "VERSÃO DE FIRMWARE": "firmware",
+      };
+      const STATUS = ["ONLINE", "OPERANDO", "VERIFICAR", "FALHA", "OFFLINE", "VAZIO"];
+      const ACESSO = ["login", "senha", "login2", "senha2"];
+      const RE_SENHA = /SENHA|LOGIN|KEY|USUÁRIO|USUARIO|PASSWORD/i;
+      // campos extras de cada sistema (além de tipo, modelo, fabricante, TAG, IP, pavimento, status)
+      const EXTRAS = { CFTV: ["nvr", "canal"], SCA: ["firmware"], SDAI: ["laco"] };
+      const ROT = {
+        id: "ID",
+        tipo: "Tipo",
+        modelo: "Modelo",
+        fabricante: "Fabricante",
+        tag: "TAG",
+        ip: "IP",
+        pav: "Pavimento",
+        nvr: "NVR",
+        canal: "Canal",
+        laco: "Laço",
+        firmware: "Firmware",
+        status: "Status",
+        login: "Login",
+        senha: "Senha",
+        login2: "Login 2",
+        senha2: "Senha 2",
+        obs: "Observação",
+      };
+      const rotSis = (sis, k) => (sis === "SAI" ? { login: "Login master", senha: "Senha master", login2: "Login remoto", senha2: "Senha remota" }[k] : "") || ROT[k];
+      const temAcesso2 = (sis) => sis === "SAI";
+
+      const txt = (v) => (v === null || v === undefined ? "" : String(v).replace(/\s+/g, " ").trim());
+      const ipValido = (s) => /^(\d{1,3}\.){3}\d{1,3}$/.test(s || "");
+      // padroniza o pavimento: TER/TR/TE → TÉRREO; 1 SS/1°SS → 1SS; 9 ANDAR/9PAV → 09P …  devolve [valor, reconhecido?]
+      function normPav(p) {
+        const s = txt(p).toUpperCase().replace(/º/g, "°");
+        if (!s || s === "-") return ["", true];
+        if (["TERREO", "TÉRREO", "TER", "TE", "TR"].includes(s)) return ["TÉRREO", true];
+        if (["MEZ", "MEZANINO"].includes(s)) return ["MEZANINO", true];
+        if (["COB", "COBERTURA"].includes(s)) return ["COBERTURA", true];
+        let m = s.match(/^(\d+)\s*°?\s*SS$/);
+        if (m) return [`${parseInt(m[1], 10)}SS`, true];
+        m = s.match(/^(\d+)\s*°?\s*(P|PAV|ANDAR|ANADAR)$/);
+        if (m) return [`${pad(parseInt(m[1], 10))}P`, true];
+        return [s, false];
+      }
+      function ordemPav(p) {
+        let m = String(p).match(/^(\d+)SS$/);
+        if (m) return [0, -m[1], ""];
+        if (p === "TÉRREO") return [1, 0, ""];
+        if (p === "MEZANINO") return [2, 0, ""];
+        m = String(p).match(/^(\d+)P$/);
+        if (m) return [3, +m[1], ""];
+        if (p === "COBERTURA") return [4, 0, ""];
+        return [5, 0, String(p)];
+      }
+      const cmpPav = (a, b) => {
+        const x = ordemPav(a),
+          y = ordemPav(b);
+        return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]);
+      };
+
+      /* ==================================================================
+   5. TRANSFORMADOR: lê a planilha antiga de senhas e monta o inventário
+   (mesma lógica do protótipo em Python: acha o cabeçalho pela coluna STATUS, traduz colunas,
+    separa os blocos de configurações e padroniza pavimento e status)
+   ================================================================== */
+      function lerPlanilha(wbx) {
+        const sistemas = {},
+          centrais = {},
+          importAlertas = [],
+          equiv = {},
+          titulos = [];
+        for (const nomeAba of wbx.SheetNames) {
+          const sistema = SISTEMAS_ABA[nomeAba.trim().toUpperCase()];
+          if (!sistema) continue;
+          const ws = wbx.Sheets[nomeAba];
+          if (!ws["!ref"]) continue;
+          const rg = XLSX.utils.decode_range(ws["!ref"]);
+          const maxR = rg.e.r + 1,
+            maxC = rg.e.c + 1;
+          const cel = (r, c) => {
+            const x = ws[XLSX.utils.encode_cell({ r: r - 1, c: c - 1 })];
+            if (!x || x.v === null || x.v === undefined) return "";
+            if (x.t === "n") return Number.isInteger(x.v) ? String(x.v) : String(x.w ?? x.v);
+            return txt(x.w ?? x.v);
+          };
+          let hr = 0,
+            sc = 0;
+          for (let r = 1; r <= Math.min(40, maxR) && !hr; r++)
+            for (let c = 1; c <= maxC; c++)
+              if (cel(r, c).toUpperCase() === "STATUS") {
+                hr = r;
+                sc = c;
+                break;
+              }
+          if (!hr) {
+            importAlertas.push({ chave: `Aba sem cabeçalho|${nomeAba}`, tipo: "Aba sem cabeçalho", sis: sistema, texto: `Não achei a linha com STATUS na aba ${nomeAba}; aba ignorada` });
+            continue;
+          }
+          for (let r = 1; r < hr; r++)
+            for (let c = 1; c <= maxC; c++) {
+              const t = cel(r, c);
+              if (t.includes("|")) titulos.push([nomeAba, sistema, t.split("|")[0].trim().toUpperCase(), t]);
+            }
+          const hdr = {};
+          for (let c = 1; c <= maxC; c++) {
+            const t = cel(hr, c).toUpperCase();
+            if (t) hdr[c] = t;
+          }
+          let ini = sc,
+            fim = sc;
+          while (hdr[ini - 1]) ini--;
+          while (hdr[fim + 1]) fim++;
+          const mapa = {};
+          for (let c = ini; c <= fim; c++) {
+            const ch = SINONIMOS[hdr[c]];
+            if (!ch) importAlertas.push({ chave: `Coluna não reconhecida|${nomeAba}|${hdr[c]}`, tipo: "Coluna não reconhecida", sis: sistema, texto: `Coluna "${hdr[c]}" da aba ${nomeAba} foi para Observação` });
+            mapa[c] = ch || "extra:" + hdr[c];
+          }
+          // blocos de configurações ao lado da tabela (servidor, NVRs, gerenciadora, acessos da central)
+          const blocos = (centrais[sistema] = centrais[sistema] || {});
+          const fora = Object.keys(hdr)
+            .map(Number)
+            .filter((c) => c < ini || c > fim)
+            .sort((a, b) => a - b);
+          const visto = new Set();
+          for (const col of fora) {
+            if (visto.has(col)) continue;
+            if (hdr[col] === "CONFIGURAÇÕES") {
+              const vals = [];
+              let c2 = col + 1;
+              while (hdr[c2] && hdr[c2] !== "CONFIGURAÇÕES") vals.push(c2++);
+              [col, ...vals].forEach((x) => visto.add(x));
+              for (const vc of vals) {
+                const nome = cel(hr, vc).toUpperCase().replace(/^NVR\s*(\d+)$/, "NVR $1");
+                const lista = (blocos[nome] = blocos[nome] || []);
+                for (let r = hr + 1; r <= maxR; r++) {
+                  const k = cel(r, col),
+                    v = cel(r, vc);
+                  if (!k) continue;
+                  if (k.toUpperCase() === "IP" && v && !ipValido(v))
+                    importAlertas.push({ chave: `IP inválido na central|${sistema}|${nome}`, tipo: "IP inválido na central", sis: sistema, texto: `Campo IP de ${nome} contém "${v}"` });
+                  lista.push([k, v]);
+                }
+              }
+            } else {
+              const cols = [col];
+              let c2 = col + 1;
+              while (hdr[c2] && c2 < ini) cols.push(c2++);
+              cols.forEach((x) => visto.add(x));
+              const lista = (blocos["CENTRAL " + sistema] = blocos["CENTRAL " + sistema] || []);
+              for (let r = hr + 1; r <= maxR; r++) {
+                const vals = cols.map((c) => cel(r, c));
+                if (vals.some(Boolean)) lista.push([vals[0], vals.slice(1).join(" / ")]);
+              }
+            }
+          }
+          // dispositivos
+          const itens = (sistemas[sistema] = sistemas[sistema] || []);
+          for (let r = hr + 1; r <= maxR; r++) {
+            const reg = {},
+              extras = [];
+            for (const [c, ch] of Object.entries(mapa)) {
+              const v = cel(r, +c);
+              if (ch.startsWith("extra:")) {
+                if (v) extras.push(`${ch.slice(6)}: ${v}`);
+              } else reg[ch] = v;
+            }
+            if (!Object.values(reg).some(Boolean) && !extras.length) continue;
+            const it = { tipo: reg.tipo || "", modelo: reg.modelo || "", fabricante: (reg.fabricante || "").toUpperCase(), tag: reg.tag || "", ip: reg.ip || "" };
+            if (!it.tipo) {
+              if (sistema === "CFTV") {
+                it.tipo = "CAMERA";
+                const k = "Tipo|(vazio, aba CFTV)|CAMERA";
+                equiv[k] = (equiv[k] || 0) + 1;
+              } else it.tipo = "NÃO INFORMADO";
+            }
+            const pOrig = reg.pav || "";
+            it.pav = normPav(pOrig)[0];
+            if (pOrig && pOrig.toUpperCase() !== it.pav) {
+              const k = `Pavimento|${pOrig}|${it.pav || "(vazio)"}`;
+              equiv[k] = (equiv[k] || 0) + 1;
+            }
+            it.status = (reg.status || "").toUpperCase();
+            for (const k of ["nvr", "canal", "laco", "firmware"]) if (reg[k]) it[k] = reg[k];
+            for (const k of ACESSO) it[k] = reg[k] || "";
+            it.obs = extras.join("; ");
+            it.origem = `${nomeAba} L${r}`;
+            itens.push(it);
+          }
+        }
+        const cont = {};
+        titulos.forEach((t) => (cont[t[2]] = (cont[t[2]] || 0) + 1));
+        const cliente = Object.entries(cont).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+        for (const [aba, sis, nome, t] of titulos)
+          if (nome !== cliente)
+            importAlertas.push({ chave: `Título de outro cliente|${aba}|${t}`, tipo: "Título de outro cliente", sis, texto: `Título "${t}" na aba ${aba} (cliente do arquivo: ${cliente}); conferir se a aba foi copiada de outro cliente` });
+        const equivalencias = Object.entries(equiv).map(([k, q]) => [...k.split("|"), q]);
+        return { cliente, sistemas, centrais, importAlertas, equivalencias };
+      }
+
+      // junta o que veio da planilha com o inventário que já existe: mantém o ID, a confirmação de acesso e a observação
+      const chaveItem = (sis, it) => [sis, it.tag, it.ip, it.nvr, it.canal, it.laco].map((x) => String(x || "").toUpperCase()).join("|");
+      function montaInventario(res, antigos, antAces = {}) {
+        const out = {};
+        for (const [sis, itens] of Object.entries(res.sistemas)) {
+          const ant = (antigos[sis] && antigos[sis].itens) || [];
+          const porChave = {};
+          ant.forEach((a) => ((porChave[chaveItem(sis, a)] = porChave[chaveItem(sis, a)] || []).push(a)));
+          const usados = new Set();
+          let prox = ant.reduce((m, a) => Math.max(m, +String(a.id).split("-").pop() || 0), 0);
+          const cod = CODIGO[sis] || sis;
+          out[sis] = itens.map((it) => {
+            const cand = (porChave[chaveItem(sis, it)] || []).find((a) => !usados.has(a.id));
+            const n = { ...it };
+            if (cand) {
+              usados.add(cand.id);
+              n.id = cand.id;
+              const credSis = credDe(sis, cand, antAces),
+                igual = JSON.stringify(credSis) === JSON.stringify(credDe(sis, it, null));
+              if (cand.verificado) {
+                // senha já conferida em campo vale mais que a planilha: mantém a do sistema e avisa a diferença
+                Object.assign(n, credSis, { verificado: cand.verificado, verificadoPor: cand.verificadoPor || "" });
+                if (!igual)
+                  res.importAlertas.push({ chave: `Senha divergente|${cand.id}|${JSON.stringify(credDe(sis, it, null))}`, tipo: "Senha da planilha diferente da confirmada", sis, ids: [cand.id], tag: it.tag, texto: `Mantida a senha confirmada em ${dh(cand.verificado)}; a planilha traz outra` });
+              }
+              if (cand.obs && !n.obs) n.obs = cand.obs;
+            } else n.id = `${cod}-${String(++prox).padStart(4, "0")}`;
+            return n;
+          });
+        }
+        return out;
+      }
+
+      /* ==================================================================
+   6. ALERTAS (calculados na hora a partir dos dados + os que vieram da importação)
+   ================================================================== */
+      function calcAlertas(inv, meta) {
+        const L = [],
+          tags = {},
+          ips = {},
+          pavs = {};
+        for (const sis of Object.keys(inv)) {
+          for (const it of inv[sis].itens || []) {
+            if (it.tag) (tags[it.tag.toUpperCase()] = tags[it.tag.toUpperCase()] || []).push([sis, it]);
+            if (ipValido(it.ip)) (ips[it.ip] = ips[it.ip] || []).push([sis, it]);
+            if (it.ip && it.ip !== "-" && !ipValido(it.ip)) L.push({ chave: `IP inválido|${it.id}`, tipo: "IP inválido", sis, ids: [it.id], tag: it.tag, texto: `IP "${it.ip}"` });
+            if (!it.tag && it.status !== "VAZIO") L.push({ chave: `Dispositivo sem TAG|${it.id}`, tipo: "Dispositivo sem TAG", sis, ids: [it.id], tag: "", texto: `${it.tipo} ${it.ip || ""}`.trim() });
+            if (it.status && !STATUS.includes(it.status)) L.push({ chave: `Status fora da lista|${it.id}`, tipo: "Status fora da lista", sis, ids: [it.id], tag: it.tag, texto: `Status "${it.status}"` });
+            if (it.pav && !normPav(it.pav)[1]) (pavs[sis + "|" + it.pav] = pavs[sis + "|" + it.pav] || []).push(it.id);
+          }
+          for (const c of inv[sis].centrais || []) {
+            const ip = (c.campos.find(([k]) => k.toUpperCase() === "IP") || [])[1];
+            if (ipValido(ip)) (ips[ip] = ips[ip] || []).push([sis, { id: c.nome, central: true }]);
+          }
+        }
+        for (const [t, l] of Object.entries(tags))
+          if (l.length > 1) L.push({ chave: `TAG duplicada|${l[0][0]}|${t}`, tipo: "TAG duplicada", sis: l[0][0], ids: l.map((x) => x[1].id), tag: t, texto: `Aparece ${l.length} vezes` });
+        for (const [ip, l] of Object.entries(ips))
+          if (l.length > 1) L.push({ chave: `IP duplicado|${ip}`, tipo: "IP duplicado", sis: l[0][0], ids: l.filter((x) => !x[1].central).map((x) => x[1].id), tag: "", texto: `${ip} usado ${l.length} vezes${l.some((x) => x[1].central) ? " (inclui " + l.filter((x) => x[1].central).map((x) => x[1].id).join(", ") + ")" : ""}` });
+        for (const [k, ids] of Object.entries(pavs)) {
+          const [sis, pv] = k.split("|");
+          L.push({ chave: `Pavimento|${sis}|${pv}`, tipo: "Pavimento não reconhecido", sis, ids, tag: pv, texto: `"${pv}" em ${plural(ids.length, "item", "itens")}; definir o nome padrão` });
+        }
+        const vistosImp = new Set();
+        for (const a of (meta && meta.importAlertas) || []) if (!vistosImp.has(a.chave)) vistosImp.add(a.chave) && L.push({ ids: [], tag: "", ...a });
+        const dec = (meta && meta.decisoes) || {};
+        L.forEach((a) => Object.assign(a, { sit: "PENDENTE", just: "", por: "", data: "" }, dec[a.chave] || {}));
+        const ordem = { "Título de outro cliente": 0, "TAG duplicada": 1, "IP duplicado": 2, "IP inválido na central": 3, "IP inválido": 4, "Dispositivo sem TAG": 5, "Pavimento não reconhecido": 6 };
+        const oSit = { NOK: 0, PENDENTE: 1, OK: 2 };
+        return L.sort((a, b) => oSit[a.sit] - oSit[b.sit] || (ordem[a.tipo] ?? 9) - (ordem[b.tipo] ?? 9) || String(a.sis).localeCompare(b.sis));
+      }
+      const alertaAtivo = (a) => a.sit !== "OK";
+      // login/senha de um dispositivo: do documento de acessos ou, na prévia da importação, do próprio item
+      function credDe(sis, it, aces) {
+        const a = ((aces && aces[sis]) || {}).acessos || {};
+        const c = a[it.id] || it;
+        const v = (x) => (x && String(x).trim() !== "-" ? x : ""); // "-" na planilha = sem login/senha
+        return { login: v(c.login), senha: v(c.senha), login2: v(c.login2), senha2: v(c.senha2) };
+      }
+      const temSenha = (c) => !!(c.login || c.senha || c.login2 || c.senha2);
+      // todo dispositivo que tem login/senha começa "a confirmar"; some quando alguém confere em campo e marca Senha OK
+      const senhaPend = (sis, it, aces) => temSenha(credDe(sis, it, aces)) && !it.verificado;
+      // resumo que fica no inventarioMeta (para a lista de clientes não precisar ler todos os dispositivos)
+      function resumo(inv, meta, aces) {
+        const r = { total: 0, sistemas: {}, status: {}, alertas: 0, verificados: 0, comSenha: 0, senhasPend: 0 };
+        for (const sis of Object.keys(inv)) {
+          const l = inv[sis].itens || [];
+          r.sistemas[sis] = l.length;
+          r.total += l.length;
+          l.forEach((it) => {
+            r.status[it.status || "-"] = (r.status[it.status || "-"] || 0) + 1;
+            if (temSenha(credDe(sis, it, aces))) {
+              r.comSenha++;
+              if (it.verificado) r.verificados++;
+              else r.senhasPend++;
+            }
+          });
+        }
+        r.alertas = calcAlertas(inv, meta).filter(alertaAtivo).length;
+        return r;
+      }
+      function idsComAlerta() {
+        const s = new Set();
+        calcAlertas(S.inv, S.meta)
+          .filter(alertaAtivo)
+          .forEach((a) => a.ids.forEach((i) => s.add(i)));
+        return s;
+      }
+
+      /* ==================================================================
+   7. INICIALIZAÇÃO, LOGIN E SESSÃO
+   ================================================================== */
+      let unsub = [],
+        unsubCli = [];
+      const parar = (l) => {
+        l.forEach((u) => {
+          try {
+            u();
+          } catch (e) {}
+        });
+        l.length = 0;
+      };
+      async function boot() {
+        render();
+        try {
+          DB = USE_FB ? await makeFirebaseDB() : makeLocalDB();
+        } catch (e) {
+          console.error(e);
+          S.fatal = "Não consegui carregar o Firebase. Verifique a internet e tente de novo.";
+          S.authChecked = true;
+          return render();
+        }
+        if (DB.mode === "firebase") {
+          DB.authM.onAuthStateChanged(DB.auth, (user) => {
+            S.authChecked = true;
+            S.user = user;
+            S.me = null;
+            S.ready = false;
+            if (user) start();
+            else {
+              parar(unsub);
+              parar(unsubCli);
+              render();
+            }
+          });
+        } else {
+          S.authChecked = true;
+          S.user = { uid: "local", email: "modo local" };
+          start();
+        }
+      }
+      async function start() {
+        try {
+          if (DB.mode === "firebase") {
+            S.me = await DB.get("usuarios", S.user.uid);
+            // mesma regra do diário: login aberto só na aba em que se entrou (o diário marca a sessão como ativa)
+            let ativo = false;
+            try {
+              ativo = !!sessionStorage.getItem("diario:ativo");
+            } catch (e) {}
+            if (!S.me || S.me.ativo === false) S.semAcesso = "Seu usuário não tem acesso. Fale com o administrador.";
+            else if (!PAPEIS[S.me.papel]) S.semAcesso = "Perfil sem permissão.";
+            else if (S.me.papel !== "admin" && !S.me.equipeId) S.semAcesso = "Seu usuário não está associado a uma equipe. Fale com o administrador.";
+            else if (S.me.papel !== "admin" && !ativo) S.semAcesso = "Entre pelo diário e abra o inventário pelo menu (a sessão do diário vale para esta página).";
+          } else S.me = { uid: "local", nome: "Modo local", papel: new URLSearchParams(location.search).get("papel") || "admin", equipeId: "eq1", ativo: true };
+          if (S.semAcesso) return render();
+          S.cfg = (await DB.get("config", "dados")) || {};
+          S.eq = (await DB.list("equipes")).sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR"));
+          if (DB.mode === "local" && !S.eq.length) S.eq = [{ id: "eq1", nome: "Equipe teste" }];
+        } catch (e) {
+          console.error(e);
+          S.fatal = "Não consegui ler os dados: " + (e.code || e.message) + ". Confira as regras do Firestore e a conexão.";
+          return render();
+        }
+        escutaBase();
+        iniciaInatividade();
+        S.ready = true;
+        const p = new URLSearchParams(location.search).get("c");
+        if (p) abreCliente(p);
+        else render();
+      }
+      function escutaBase() {
+        parar(unsub);
+        unsub.push(
+          DB.listen("clientes", filtro(), null, (a) => {
+            S.clientes = a.filter((c) => !c.arquivado).sort((x, y) => (x.unidade || "").localeCompare(y.unidade || "", "pt-BR"));
+            render();
+          }),
+          DB.listen("inventarioMeta", filtro(), null, (a) => {
+            S.metas = a;
+            render();
+          }),
+        );
+      }
+      // desconecta por inatividade (mesmo tempo configurado no diário); o administrador fica de fora, como no diário
+      let ultAtiv = Date.now();
+      ["pointerdown", "keydown", "touchstart", "input", "scroll"].forEach((e) =>
+        document.addEventListener(
+          e,
+          () => {
+            ultAtiv = Date.now();
+            try {
+              localStorage.setItem("diario:ultAtiv", String(ultAtiv));
+            } catch (x) {}
+          },
+          { capture: true, passive: true },
+        ),
+      );
+      function iniciaInatividade() {
+        if (DB.mode !== "firebase" || ehAdmin()) return;
+        const lim = Math.max(1, Number(S.cfg.inatividade) || 30) * 60000;
+        setInterval(() => {
+          if (Date.now() - ultAtiv > lim && !gravando) sair();
+        }, 10000);
+      }
+      async function sair() {
+        try {
+          sessionStorage.removeItem("diario:ativo");
+        } catch (e) {}
+        if (DB.mode === "firebase") await DB.authM.signOut(DB.auth);
+        location.href = "index.html";
+      }
+
+      /* abre um cliente: escuta os documentos do inventário dele */
+      function abreCliente(id) {
+        parar(unsubCli);
+        Object.assign(S, { cliId: id, view: "cliente", aba: "", inv: {}, aces: {}, meta: null, aberto: "", fBusca: "", fPav: "", fSt: "", fAl: false, fSp: false, lim: 200, vistas: {}, selSen: {}, grAb: {} });
+        const cli = S.clientes.find((c) => c.id === id);
+        const f = ehAdmin() ? { clienteId: id } : { clienteId: id, equipeId: S.me.equipeId };
+        unsubCli.push(
+          DB.listen("inventario", f, null, (a) => {
+            S.inv = {};
+            a.forEach((d) => (S.inv[d.sistema] = d));
+            if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
+            render();
+          }),
+          DB.listen("inventarioAcessos", f, null, (a) => {
+            S.aces = {};
+            a.forEach((d) => (S.aces[d.sistema] = d));
+            render();
+          }),
+          DB.listen("inventarioMeta", ehAdmin() ? { clienteId: id } : { clienteId: id, equipeId: S.me.equipeId }, null, (a) => {
+            S.meta = a[0] || null;
+            render();
+          }),
+        );
+        if (!cli && S.clientes.length) toast("Cliente não encontrado na sua equipe.");
+        render(false);
+      }
+
+      /* ==================================================================
+   8. TELAS
+   ================================================================== */
+      function vHeader() {
+        const eqs = ehAdmin()
+          ? `<label class="heq">Equipe<select id="eqsel"><option value="">Todas</option>${S.eq.map((e) => `<option value="${esc(e.id)}"${e.id === S.eqSel ? " selected" : ""}>${esc(e.nome)}</option>`).join("")}</select></label>`
+          : "";
+        return `<header class="hnew"><button class="burger" data-a="menuT" aria-label="Menu">&#9776;</button><img src="logo-branca.png" class="logo" alt="Controller BMS" onerror="this.style.display='none'">
+  <div class="hdir">${DB.mode === "firebase" ? '<button class="b o s hsair" data-a="sair">Sair</button>' : '<span class="chip warn">modo local (teste)</span>'}
+  <div class="hinfo"><span id="savestat" class="chip ok">Salvo</span>${eqs}</div></div></header>`;
+      }
+      function vNav() {
+        const t = [["lista", "Inventários"], ...(pode("inv.importar") ? [["importar", "Importar planilha"]] : [])];
+        const eq = S.me.equipeId ? " · " + eqNome(S.me.equipeId) : "";
+        return `<div class="mbk${S.menuAb ? " on" : ""}" data-a="menuT"></div><nav class="${S.menuAb ? "open" : ""}">${t
+          .map(([v, n]) => `<button class="${S.view === v || (v === "lista" && S.view === "cliente") ? "on" : ""}" data-v="${v}">${n}</button>`)
+          .join("")}<button data-a="diario">Voltar ao diário</button><div class="nuser"><span class="ncargo">${esc(PAPEIS[S.me.papel] || "")}${esc(eq)}</span><b class="nnome">${esc(meuNome())}</b></div></nav>`;
+      }
+
+      /* ---- lista de clientes com e sem inventário ---- */
+      function vLista() {
+        const metas = Object.fromEntries(S.metas.map((m) => [m.clienteId, m]));
+        const b = semAcento(S.busca).toLowerCase();
+        const cl = S.clientes.filter((c) => !b || semAcento(`${c.unidade} ${c.mp || ""}`).toLowerCase().includes(b));
+        const com = cl.filter((c) => metas[c.id]),
+          sem = cl.filter((c) => !metas[c.id]);
+        const tot = com.reduce(
+          (a, c) => {
+            const r = metas[c.id].resumo || {};
+            a.d += r.total || 0;
+            a.al += r.alertas || 0;
+            a.sp += r.senhasPend || 0;
+            return a;
+          },
+          { d: 0, al: 0, sp: 0 },
+        );
+        const card = (c) => {
+          const m = metas[c.id],
+            r = m.resumo || {};
+          const sis = Object.entries(r.sistemas || {})
+            .map(([s, n]) => `<span class="chip">${esc(s)} ${n}</span>`)
+            .join(" ");
+          return `<div class="li" data-a="abreCli" data-id="${esc(c.id)}"><div class="t"><b>${esc(c.unidade)}</b><span>${c.mp ? `<span class="chip">${esc(c.mp)}</span> ` : ""}<span class="chip ok">${plural(r.total || 0)}</span> ${r.senhasPend ? `<span class="chip red">${r.senhasPend} senha${r.senhasPend > 1 ? "s" : ""} a confirmar</span> ` : ""}${r.alertas ? `<span class="chip am">${r.alertas} alerta${r.alertas > 1 ? "s" : ""}</span>` : ""}</span></div>
+  <div class="sm">${sis}</div><div class="sm">Versão v${m.versao || 1} · atualizado em ${esc(m.atualizadoEm || "")}${m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${ehAdmin() && !S.eqSel ? " · " + esc(eqNome(c.equipeId)) : ""}</div></div>`;
+        };
+        return `<div class="card"><h2>Inventário de dispositivos</h2>
+  <div class="kpis"><div class="kpi"><div class="r">Clientes com inventário</div><div class="n">${com.length}</div></div><div class="kpi"><div class="r">Dispositivos</div><div class="n">${tot.d}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${tot.sp}</div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${tot.al}</div></div><div class="kpi"><div class="r">Clientes sem inventário</div><div class="n">${sem.length}</div></div></div>
+  <label>Buscar cliente</label><input id="busca" data-f="busca" value="${esc(S.busca)}" placeholder="Nome ou MP"></div>
+  <div class="card"><h2>Com inventário</h2>${com.map(card).join("") || '<p class="sm">Nenhum inventário ainda.' + (pode("inv.importar") ? " Use Importar planilha." : "") + "</p>"}</div>
+  ${sem.length ? `<div class="card"><h2>Sem inventário</h2>${sem.map((c) => `<div class="li" style="cursor:default"><div class="t"><b>${esc(c.unidade)}</b><span>${c.mp ? `<span class="chip">${esc(c.mp)}</span> ` : ""}${pode("inv.importar") ? `<button class="b s" data-a="impCli" data-id="${esc(c.id)}" style="margin:0">Importar planilha</button>` : ""}</span></div></div>`).join("")}</div>` : ""}`;
+      }
+
+      /* ---- importação (só administrador) ---- */
+      function vImportar() {
+        if (!pode("inv.importar")) return '<div class="card"><p>Só o administrador pode subir planilhas.</p></div>';
+        const I = S.imp,
+          r = I.res;
+        const existe = I.cliId && S.metas.find((m) => m.clienteId === I.cliId);
+        let prev = "";
+        if (r) {
+          const inv = {};
+          Object.keys(r.inv).forEach((s) => (inv[s] = { itens: r.inv[s], centrais: [] }));
+          const al = calcAlertas(inv, { importAlertas: r.importAlertas, decisoes: (existe && existe.decisoes) || {} });
+          const rs = resumo(inv, {}, null);
+          const cliSel = cliNome(I.cliId);
+          const difNome = r.cliente && semAcento(cliSel).toUpperCase().replace(/[^A-Z0-9]/g, "").indexOf(semAcento(r.cliente).toUpperCase().replace(/^ED\.?\s*/, "").replace(/[^A-Z0-9]/g, "")) < 0;
+          prev = `<div class="card"><h2>Prévia</h2>
+  ${difNome ? `<div class="note">A planilha diz <b>${esc(r.cliente)}</b> e o cliente escolhido é <b>${esc(cliSel)}</b>. Confira se é o arquivo certo.</div>` : ""}
+  ${existe ? `<div class="note">Este cliente já tem inventário (versão v${existe.versao || 1}). Ao salvar, ele é substituído pela planilha, mas mantém os IDs dos dispositivos que continuam, as confirmações de acesso, as decisões dos alertas e a legenda.</div>` : ""}
+  <div class="kpis">${Object.entries(r.inv)
+    .map(([s, l]) => `<div class="kpi"><div class="r">${esc(s)}</div><div class="n">${l.length}</div></div>`)
+    .join("")}<div class="kpi am"><div class="r">Alertas</div><div class="n">${al.filter(alertaAtivo).length}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${rs.senhasPend}</div></div></div>
+  <p class="sm">Todo dispositivo com login/senha entra como <b>senha a confirmar</b>. Ele sai dessa lista quando alguém confere a senha no cliente e marca <b>Senha OK</b>.${existe ? " Os que já estavam confirmados continuam confirmados se a senha não mudou." : ""}</p>
+  <details class="eq"><summary class="sp"><b>Alertas encontrados</b><span class="chip am">${al.length}</span></summary>${al.map((a) => `<div class="sm">· <b>${esc(a.tipo)}</b> (${esc(a.sis)}) ${esc(a.tag || "")} — ${esc(a.texto)}</div>`).join("") || '<p class="sm">Nenhum.</p>'}</details>
+  <details class="eq"><summary class="sp"><b>Padronização aplicada</b><span class="chip">${r.equivalencias.length}</span></summary><div class="prev"><table><tr><th>Campo</th><th>Original</th><th>Padronizado</th><th>Qtd.</th></tr>${r.equivalencias.map((e) => `<tr><td>${esc(e[0])}</td><td>${esc(e[1])}</td><td>${esc(e[2])}</td><td>${e[3]}</td></tr>`).join("")}</table></div></details>
+  <button class="b" data-a="impSalva"${I.salvando ? " disabled" : ""} style="width:100%">${I.salvando ? "Salvando…" : existe ? "Substituir o inventário (vira v" + ((existe.versao || 1) + 1) + ")" : "Salvar inventário"}</button></div>`;
+        }
+        return `<div class="card"><h2>Importar planilha antiga de senhas</h2>
+  <p class="sm">Escolha o cliente e anexe a planilha (.xlsx). O sistema lê as abas CFTV, SCA, SAI, SDAI, Automação e Sonorização, padroniza pavimento e status, separa servidores e NVRs e mostra os alertas antes de salvar.</p>
+  <label>Cliente</label><select id="impCli"><option value="">— escolher —</option>${S.clientes.map((c) => `<option value="${esc(c.id)}"${c.id === I.cliId ? " selected" : ""}>${esc(c.unidade)}${S.metas.find((m) => m.clienteId === c.id) ? " (já tem inventário)" : ""}</option>`).join("")}</select>
+  <label>Planilha (.xlsx)</label><input type="file" id="impArq" accept=".xlsx,.xlsm,.xls">${I.nome ? `<div class="sm">Arquivo lido: <b>${esc(I.nome)}</b></div>` : ""}
+  <div class="err">${esc(I.erro)}</div></div>${prev}`;
+      }
+
+      /* ---- tela do cliente ---- */
+      function vCliente() {
+        const cli = S.clientes.find((c) => c.id === S.cliId) || { unidade: S.meta ? S.meta.clienteNome : "Cliente" };
+        const m = S.meta;
+        if (!m && !Object.keys(S.inv).length)
+          return `<div class="card"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3 style="margin-top:10px">${esc(cli.unidade)}</h3><p class="sm">Este cliente ainda não tem inventário.</p>${pode("inv.importar") ? `<button class="b" data-a="impCli" data-id="${esc(S.cliId)}">Importar planilha</button>` : ""}</div>`;
+        const al = calcAlertas(S.inv, m),
+          alAt = al.filter(alertaAtivo).length;
+        const r = resumo(S.inv, m, S.aces);
+        const ok = (r.status.ONLINE || 0) + (r.status.OPERANDO || 0),
+          base = r.total - (r.status.VAZIO || 0) - (r.status["-"] || 0),
+          disp = base ? Math.round((ok / base) * 1000) / 10 : 0;
+        const abas = [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))];
+        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
+        const corpo = S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
+        return `<div class="card cinl"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3>${esc(cli.unidade)}</h3><div class="cacts">${cli.mp ? `<span class="chip">${esc(cli.mp)}</span>` : ""}<span class="chip">v${(m && m.versao) || 1}</span>
+  <button class="b o s" data-a="exporta">Exportar Excel</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
+  <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
+  <div class="kpis"><div class="kpi"><div class="r">Dispositivos</div><div class="n">${r.total}</div></div><div class="kpi ok"><div class="r">Disponibilidade</div><div class="n">${String(disp).replace(".", ",")}%</div></div><div class="kpi red"><div class="r">Falha / Offline</div><div class="n">${(r.status.FALHA || 0) + (r.status.OFFLINE || 0)}</div></div><div class="kpi am"><div class="r">Verificar</div><div class="n">${r.status.VERIFICAR || 0}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${r.senhasPend}</div></div><div class="kpi ok"><div class="r">Senhas confirmadas</div><div class="n">${r.verificados}<span class="sm"> de ${r.comSenha}</span></div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${alAt}</div></div></div>
+  ${tabs}<div class="aux">${corpo}</div>`;
+      }
+
+      function camposSis(sis) {
+        return ["tipo", "modelo", "fabricante", "tag", "ip", "pav", ...(EXTRAS[sis] || []), "status"];
+      }
+      function vSistema(sis) {
+        const doc = S.inv[sis],
+          itens = doc.itens || [];
+        const comAl = idsComAlerta();
+        const b = semAcento(S.fBusca).toLowerCase();
+        const leg = (S.meta && S.meta.legenda) || {};
+        let l = itens.filter(
+          (it) =>
+            (!b || semAcento([it.id, it.tag, it.ip, it.tipo, it.modelo, it.pav, leg[sis + "|" + it.tipo]].join(" ")).toLowerCase().includes(b)) &&
+            (!S.fPav || it.pav === S.fPav) &&
+            (!S.fSt || it.status === S.fSt) &&
+            (!S.fAl || comAl.has(it.id)) &&
+            (!S.fSp || senhaPend(sis, it, S.aces)),
+        );
+        const pavs = [...new Set(itens.map((i) => i.pav).filter(Boolean))].sort(cmpPav);
+        const ext = EXTRAS[sis] || [];
+        const cols = ["id", "tipo", "tag", "ip", "pav", ...ext.filter((k) => k !== "firmware"), "status"];
+        const n = l.length;
+        l = l.slice(0, S.lim);
+        const linhas = l
+          .map((it) => {
+            const on = S.aberto === it.id;
+            const tds = cols
+              .map((k) => {
+                let v = esc(it[k] || "");
+                if (k === "status") v = `<span class="st ${esc(it.status || "x")}">${esc(it.status || "—")}</span>`;
+                if (k === "tipo" && leg[sis + "|" + it.tipo]) v += `<div class="sm">${esc(leg[sis + "|" + it.tipo])}</div>`;
+                if (k === "id" && comAl.has(it.id)) v += '<span class="tag-al">alerta</span>';
+                if (k === "ip" || k === "id") v = `<span class="mono">${v}</span>`;
+                return `<td data-l="${esc(ROT[k])}"${k === "tag" ? ' class="c-tag"' : ""}>${v}</td>`;
+              })
+              .join("");
+            const ver = it.verificado
+              ? `<span class="ver">${dh(it.verificado)}</span>`
+              : senhaPend(sis, it, S.aces)
+                ? '<span class="st FALHA">a confirmar</span>'
+                : '<span class="ver nao">sem senha</span>';
+            return `<tr class="it${on ? " on" : ""}${comAl.has(it.id) ? " al" : ""}" data-a="abreItem" data-id="${esc(it.id)}">${tds}<td data-l="Senha">${ver}</td></tr>${on ? `<tr class="det"><td colspan="${cols.length + 1}">${vItem(sis, it)}</td></tr>` : ""}`;
+          })
+          .join("");
+        const cent = (doc.centrais || []).length
+          ? `<details class="eq"${S.centAb ? " open" : ""} data-a="centT"><summary class="sp"><b>Servidores, gravadores e centrais</b><span class="chip">${doc.centrais.length}</span></summary>${doc.centrais.map((c) => vCentral(sis, c)).join("")}</details>`
+          : "";
+        return `${cent}<div class="filtros"><div class="busca"><label>Buscar (ID, TAG, IP, tipo, modelo)</label><input id="fBusca" data-f="fBusca" value="${esc(S.fBusca)}"></div>
+  <div><label>Pavimento</label><select data-f="fPav"><option value="">Todos</option>${pavs.map((p) => `<option${p === S.fPav ? " selected" : ""}>${esc(p)}</option>`).join("")}</select></div>
+  <div><label>Status</label><select data-f="fSt"><option value="">Todos</option>${STATUS.map((p) => `<option${p === S.fSt ? " selected" : ""}>${p}</option>`).join("")}</select></div>
+  <div><label class="k" style="margin:0 0 4px"><input type="checkbox" data-f="fAl"${S.fAl ? " checked" : ""}> Só com alerta</label><label class="k" style="margin:0 0 6px"><input type="checkbox" data-f="fSp"${S.fSp ? " checked" : ""}> Só senha a confirmar</label></div></div>
+  <div class="top"><span class="sm">${n} de ${itens.length} ${n === 1 ? "dispositivo" : "dispositivos"}</span>${pode("inv.novo") ? `<button class="b s" data-a="novoItem" style="margin:0">+ Adicionar dispositivo</button>` : ""}</div>
+  <div class="tblw"><table class="tbl"><thead><tr>${cols.map((k) => `<th>${esc(ROT[k])}</th>`).join("")}<th>Senha</th></tr></thead><tbody>${linhas || `<tr><td colspan="${cols.length + 1}" class="sm">Nada encontrado.</td></tr>`}</tbody></table></div>
+  ${n > S.lim ? `<button class="b o mais" data-a="mais">Mostrar mais (${n - S.lim} restantes)</button>` : ""}`;
+      }
+      function campoSenha(id, valor, editavel, rot) {
+        const vis = S.vistas[id];
+        return `<label>${esc(rot)}</label><div class="senha"><input id="${esc(id)}" type="${vis ? "text" : "password"}" value="${esc(valor || "")}"${editavel ? "" : " readonly"} autocomplete="off"><button class="b o s" data-a="verSenha" data-id="${esc(id)}">${vis ? "Ocultar" : "Mostrar"}</button></div>`;
+      }
+      function vItem(sis, it) {
+        const ed = pode("inv.editar"),
+          edA = pode("inv.acesso"),
+          ac = ((S.aces[sis] || {}).acessos || {})[it.id] || {};
+        const leg = (S.meta && S.meta.legenda) || {};
+        const campo = (k) => {
+          if (k === "status")
+            return `<div><label>Status</label><select id="e_status"${ed ? "" : " disabled"}>${["", ...STATUS].map((s) => `<option${s === (it.status || "") ? " selected" : ""}>${s}</option>`).join("")}</select></div>`;
+          if (k === "pav") return `<div><label>Pavimento</label><input id="e_pav" list="dlPav" value="${esc(it.pav || "")}"${ed ? "" : " readonly"}></div>`;
+          return `<div><label>${esc(ROT[k])}</label><input id="e_${k}" value="${esc(it[k] || "")}"${ed ? "" : " readonly"}></div>`;
+        };
+        const acessos = ["login", "senha", ...(temAcesso2(sis) || ac.login2 || ac.senha2 ? ["login2", "senha2"] : [])]
+          .map((k) => (k.startsWith("senha") ? `<div>${campoSenha("e_" + k, ac[k], edA, rotSis(sis, k))}</div>` : `<div><label>${esc(rotSis(sis, k))}</label><input id="e_${k}" value="${esc(ac[k] || "")}"${edA ? "" : " readonly"} autocomplete="off"></div>`))
+          .join("");
+        return `<div class="sm"><b>${esc(it.id)}</b>${leg[sis + "|" + it.tipo] ? " · " + esc(leg[sis + "|" + it.tipo]) : ""}${it.origem ? " · veio de " + esc(it.origem) : ""}</div>
+  <div class="g">${camposSis(sis).map(campo).join("")}</div>
+  <div class="g">${acessos}</div>
+  <label>Observação</label><textarea id="e_obs" rows="2"${ed ? "" : " readonly"}>${esc(it.obs || "")}</textarea>
+  <div class="sm" style="margin-top:6px">${it.verificado ? `<span class="ver">Senha confirmada em <b>${dh(it.verificado)}</b>${it.verificadoPor ? " por " + esc(it.verificadoPor) : ""}</span>` : temSenha(credDe(sis, it, S.aces)) ? '<span class="st FALHA">Senha a confirmar</span>' : "Sem login/senha cadastrados."}${it.alteradoEm ? ` · última alteração em ${esc(it.alteradoEm)}${it.alteradoPor ? " por " + esc(it.alteradoPor) : ""}` : ""}</div>
+  <div>${ed || edA ? `<button class="b" data-a="salvaItem">Salvar alterações</button>` : ""}${pode("inv.confirmar") ? `<button class="b o" data-a="confirma">Senha OK (confirmar agora)</button>` : ""}${pode("inv.excluir") ? `<button class="b o" data-a="excluiItem">Excluir dispositivo</button>` : ""}<button class="b o" data-a="fechaItem">Fechar</button></div>`;
+      }
+      function vCentral(sis, c) {
+        const sens = (((S.aces[sis] || {}).centrais || {})[c.nome] || []).map(([k, v], i) => [k, v, `cs_${sis}_${c.nome}_${i}`]);
+        const linhas = c.campos.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("");
+        const lsens = sens
+          .map(([k, v, id]) => `<tr><td>${esc(k)}</td><td>${S.vistas[id] ? esc(v) : v ? "••••••" : ""} ${v ? `<button class="b o s" data-a="verSenha" data-id="${esc(id)}" style="margin:0 0 0 6px">${S.vistas[id] ? "Ocultar" : "Mostrar"}</button>` : ""}</td></tr>`)
+          .join("");
+        return `<div class="cent"><b class="rd">${esc(c.nome)}</b><table>${linhas}${lsens}</table></div>`;
+      }
+
+      /* ---- senhas a confirmar: agrupadas por login/senha iguais, para confirmar várias de uma vez ---- */
+      function vSenhas() {
+        const podeC = pode("inv.confirmar"),
+          sel = S.selSen || {},
+          grAb = S.grAb || {};
+        let total = 0;
+        const blocos = SISTEMAS.filter((s) => S.inv[s])
+          .map((sis) => {
+            const pend = (S.inv[sis].itens || []).filter((it) => senhaPend(sis, it, S.aces));
+            if (!pend.length) return "";
+            total += pend.length;
+            const grupos = {};
+            pend.forEach((it) => {
+              const c = credDe(sis, it, S.aces),
+                k = JSON.stringify(c);
+              (grupos[k] = grupos[k] || { c, l: [] }).l.push(it);
+            });
+            const html = Object.values(grupos)
+              .sort((a, b) => b.l.length - a.l.length)
+              .map((g, gi) => {
+                const keys = g.l.map((it) => `${sis}|${it.id}`),
+                  todos = keys.every((k) => sel[k]),
+                  nSel = keys.filter((k) => sel[k]).length;
+                const vid = `gs_${sis}_${gi}`,
+                  vis = S.vistas[vid];
+                const mostra = (v) => (v ? (vis ? esc(v) : "••••••") : "—");
+                const cred = `${esc(rotSis(sis, "login"))}: <b>${esc(g.c.login || "—")}</b> · ${esc(rotSis(sis, "senha"))}: <b>${mostra(g.c.senha)}</b>${g.c.login2 || g.c.senha2 ? ` · ${esc(rotSis(sis, "login2"))}: <b>${esc(g.c.login2 || "—")}</b> · ${esc(rotSis(sis, "senha2"))}: <b>${mostra(g.c.senha2)}</b>` : ""}`;
+                const gk = `${sis}|${gi}`;
+                return `<details class="eq" data-g="${esc(gk)}"${grAb[gk] ? " open" : ""}><summary class="sp"><span>${cred}</span><span class="chip red">${g.l.length}${nSel ? ` · ${nSel} marcado${nSel > 1 ? "s" : ""}` : ""}</span></summary>
+  <div class="row" style="align-items:center;margin-top:6px">${podeC ? `<label class="k" style="margin:0"><input type="checkbox" data-selg="${esc(keys.join(","))}"${todos ? " checked" : ""}> Marcar os ${g.l.length}</label>` : ""}${g.c.senha || g.c.senha2 ? `<div style="flex:0 0 auto;min-width:0"><button class="b o s" data-a="verSenha" data-id="${vid}" style="margin:0">${vis ? "Ocultar senha" : "Mostrar senha"}</button></div>` : ""}</div>
+  ${g.l
+    .map(
+      (it) => `<label class="k" style="align-items:flex-start">${podeC ? `<input type="checkbox" data-sel="${esc(sis + "|" + it.id)}"${sel[sis + "|" + it.id] ? " checked" : ""}>` : ""}<span><span class="mono">${esc(it.id)}</span> · ${esc(it.tipo)} · <b>${esc(it.tag || "(sem TAG)")}</b>${it.ip ? ` · <span class="mono">${esc(it.ip)}</span>` : ""}${it.pav ? " · " + esc(it.pav) : ""} <a class="rd" data-a="vaiItem" data-id="${esc(it.id)}" style="cursor:pointer;text-decoration:underline;font-size:12px">abrir</a></span></label>`,
+    )
+    .join("")}</details>`;
+              })
+              .join("");
+            return `<div class="card"><h2>${esc(sis)} · ${pend.length} a confirmar</h2>${html}</div>`;
+          })
+          .join("");
+        if (!total) return '<div class="card"><p>Todas as senhas deste cliente estão confirmadas.</p></div>';
+        const nSel = Object.entries(sel).filter(([k, v]) => {
+          if (!v) return false;
+          const [sis, id] = k.split("|");
+          const it = ((S.inv[sis] || {}).itens || []).find((i) => i.id === id);
+          return it && senhaPend(sis, it, S.aces);
+        }).length;
+        return `<div class="note" style="background:#f6f6f7">No cliente, confira se o login e a senha da planilha funcionam no equipamento. Se funcionar, marque e clique em <b>Senha OK</b>: fica registrado o dia, a hora e quem confirmou. Se a senha for outra, toque em <b>abrir</b>, corrija e clique em <b>Senha OK</b> na ficha do dispositivo.</div>
+  ${podeC ? `<div class="top" style="position:sticky;top:-10px;background:#fff;z-index:2;padding:8px 0;border-bottom:1px solid var(--l)"><span class="sm">${nSel} selecionado${nSel === 1 ? "" : "s"} de ${total}</span><button class="b" data-a="confirmaSel" style="margin:0"${nSel ? "" : " disabled"}>Senha OK nos selecionados</button></div>` : ""}${blocos}`;
+      }
+
+      function vAlertas(al) {
+        const edita = pode("inv.alertas");
+        if (!al.length) return '<div class="card"><p class="sm">Nenhum alerta. Tudo certo com este inventário.</p></div>';
+        return `<div class="note" style="background:#f6f6f7">PENDENTE = ainda não conferido · OK = conferido e está certo (sai das contagens) · NOK = problema confirmado.</div>${al
+          .map(
+            (a, i) => `<div class="al ${a.sit}"><div class="t"><b>${esc(a.tipo)} <span class="sm">· ${esc(a.sis)}</span></b>${
+              edita ? `<select class="sitsel" data-a="sit" data-i="${i}">${["PENDENTE", "OK", "NOK"].map((s) => `<option${s === a.sit ? " selected" : ""}>${s}</option>`).join("")}</select>` : `<span class="chip ${a.sit === "OK" ? "ok" : a.sit === "NOK" ? "red" : "am"}">${a.sit}</span>`
+            }</div>
+  <div>${a.tag ? `<b>${esc(a.tag)}</b> — ` : ""}${esc(a.texto)}</div>${a.ids.length ? `<div class="ids sm">Dispositivos: ${a.ids.map((id) => `<a data-a="vaiItem" data-id="${esc(id)}">${esc(id)}</a>`).join("")}</div>` : ""}
+  ${edita ? `<div class="row"><div><label>Justificativa</label><input id="aj_${i}" value="${esc(a.just)}"></div><div style="flex:0 0 auto;min-width:0"><button class="b s" data-a="salvaAl" data-i="${i}">Salvar</button></div></div>` : a.just ? `<div class="sm">Justificativa: ${esc(a.just)}</div>` : ""}
+  ${a.por ? `<div class="sm">Conferido por ${esc(a.por)} em ${esc(a.data)}</div>` : ""}</div>`,
+          )
+          .join("")}`;
+      }
+      function vLegenda() {
+        const leg = (S.meta && S.meta.legenda) || {},
+          ed = pode("inv.legenda");
+        const blocos = SISTEMAS.filter((s) => S.inv[s])
+          .map((sis) => {
+            const cont = {};
+            (S.inv[sis].itens || []).forEach((it) => (cont[it.tipo] = (cont[it.tipo] || 0) + 1));
+            const l = Object.entries(cont).sort((a, b) => b[1] - a[1]);
+            return `<div class="card"><h2>${esc(sis)}</h2>${l
+              .map(([tp, q], i) => `<div class="row"><div style="flex:0 0 180px"><label>Tipo</label><b>${esc(tp)}</b> <span class="sm">(${q})</span></div><div><label>Descrição</label><input data-leg="${esc(sis + "|" + tp)}" value="${esc(leg[sis + "|" + tp] || "")}"${ed ? "" : " readonly"} placeholder="${ed ? "Ex.: o que significa esta sigla" : ""}"></div></div>`)
+              .join("")}</div>`;
+          })
+          .join("");
+        return `<p class="sm">A descrição aparece junto do tipo nas listas e na exportação. ${ed ? "Edite e clique em Salvar legenda." : ""}</p>${blocos}${ed ? '<button class="b" data-a="salvaLeg" style="width:100%">Salvar legenda</button>' : ""}`;
+      }
+
+      const VIEWS = { lista: vLista, importar: vImportar, cliente: vCliente };
+      function render(keep = true) {
+        const app = $("#app");
+        const pa = $(".painel"),
+          au = $(".aux"),
+          sPa = pa ? pa.scrollTop : 0,
+          sAu = au ? au.scrollTop : 0,
+          tela = pa ? pa.dataset.tela : "";
+        const foco = document.activeElement && document.activeElement.id,
+          selS = document.activeElement && document.activeElement.selectionStart;
+        if (S.fatal) return (app.innerHTML = `<div class="card"><h2>Erro</h2><p>${esc(S.fatal)}</p><button class="b" onclick="location.reload()">Tentar de novo</button></div>`);
+        if (!S.authChecked) return (app.innerHTML = '<p class="center">Carregando…</p>');
+        if (DB && DB.mode === "firebase" && !S.user)
+          return (app.innerHTML = `<div class="card login"><img src="logo-branca.png" alt="Controller BMS" onerror="this.style.display='none'"><h3>Inventário</h3><p>Entre pelo diário para abrir o inventário.</p><a class="b" href="index.html" style="display:block;text-align:center;text-decoration:none">Ir para o diário</a></div>`);
+        if (S.semAcesso)
+          return (app.innerHTML = `<div class="card login"><img src="logo-branca.png" alt="Controller BMS" onerror="this.style.display='none'"><h3>Sem acesso</h3><p>${esc(S.semAcesso)}</p><a class="b" href="index.html" style="display:block;text-align:center;text-decoration:none">Ir para o diário</a></div>`);
+        if (!S.ready) return (app.innerHTML = '<p class="center">Carregando dados…</p>');
+        const pavs = [...new Set(Object.values(S.inv).flatMap((d) => (d.itens || []).map((i) => i.pav)).filter(Boolean))].sort(cmpPav);
+        app.innerHTML =
+          vHeader() +
+          `<div class="shell">${vNav()}<div class="main"><main class="painel" data-tela="${S.view}">${VIEWS[S.view]()}</main></div></div><datalist id="dlPav">${pavs.map((p) => `<option value="${esc(p)}">`).join("")}</datalist>`;
+        showSave();
+        if (keep) {
+          const np = $(".painel");
+          if (np && np.dataset.tela === tela) {
+            np.scrollTop = sPa;
+            const na = $(".aux");
+            if (na) na.scrollTop = sAu;
+          }
+          if (foco && ["busca", "fBusca"].includes(foco)) {
+            const el = document.getElementById(foco);
+            if (el) {
+              el.focus();
+              try {
+                el.setSelectionRange(selS, selS);
+              } catch (e) {}
+            }
+          }
+        }
+      }
+      function go(v) {
+        S.view = v;
+        S.menuAb = false;
+        if (v !== "cliente") parar(unsubCli);
+        render(false);
+      }
+
+      /* ==================================================================
+   9. AÇÕES
+   ================================================================== */
+      function itemAtual() {
+        const doc = S.inv[S.aba];
+        return doc ? (doc.itens || []).find((i) => i.id === S.aberto) : null;
+      }
+      async function salvaMeta(mod) {
+        const m = clone(S.meta || { id: S.cliId, clienteId: S.cliId, equipeId: (S.clientes.find((c) => c.id === S.cliId) || {}).equipeId || "", versao: 1, decisoes: {}, legenda: {}, importAlertas: [] });
+        mod && mod(m);
+        m.resumo = resumo(S.inv, m, S.aces);
+        S.meta = m;
+        return grava("inventarioMeta", m.id, m);
+      }
+      async function salvaSistema(sis, aces) {
+        const doc = clone(S.inv[sis]);
+        doc.atualizadoEm = agora();
+        doc.atualizadoPor = meuNome();
+        S.inv[sis] = doc;
+        const ok = await grava("inventario", doc.id, doc);
+        if (ok && aces) await grava("inventarioAcessos", S.aces[sis].id, S.aces[sis]);
+        if (ok) await salvaMeta((m) => {
+          m.atualizadoEm = agora();
+          m.atualizadoPor = meuNome();
+        });
+        return ok;
+      }
+      function leAcessosDoForm(sis, id) {
+        const a = clone(((S.aces[sis] || {}).acessos || {})[id] || {});
+        let mudou = false;
+        ACESSO.forEach((k) => {
+          const el = $("#e_" + k);
+          if (el && (a[k] || "") !== el.value.trim()) {
+            a[k] = el.value.trim();
+            mudou = true;
+          }
+        });
+        return [a, mudou];
+      }
+      function garanteAces(sis) {
+        if (!S.aces[sis]) {
+          const d = S.inv[sis];
+          S.aces[sis] = { id: d.id, clienteId: d.clienteId, equipeId: d.equipeId, sistema: sis, acessos: {}, centrais: {} };
+        }
+        S.aces[sis] = clone(S.aces[sis]);
+        S.aces[sis].acessos = S.aces[sis].acessos || {};
+      }
+
+      const ACOES = {
+        menuT() {
+          S.menuAb = !S.menuAb;
+          render();
+        },
+        sair,
+        diario() {
+          location.href = "index.html";
+        },
+        abreCli(el) {
+          abreCliente(el.dataset.id);
+        },
+        impCli(el) {
+          S.imp = { cliId: el.dataset.id, nome: "", res: null, erro: "", salvando: false };
+          go("importar");
+        },
+        mais() {
+          S.lim += 300;
+          render();
+        },
+        centT(el, ev) {
+          setTimeout(() => (S.centAb = el.open), 0);
+        },
+        abreItem(el) {
+          S.aberto = S.aberto === el.dataset.id ? "" : el.dataset.id;
+          render();
+        },
+        fechaItem() {
+          S.aberto = "";
+          render();
+        },
+        vaiItem(el) {
+          const id = el.dataset.id;
+          const sis = Object.keys(S.inv).find((s) => (S.inv[s].itens || []).some((i) => i.id === id));
+          if (!sis) return;
+          Object.assign(S, { aba: sis, aberto: id, fBusca: id, fPav: "", fSt: "", fAl: false, fSp: false });
+          render(false);
+        },
+        verSenha(el) {
+          const id = el.dataset.id;
+          S.vistas[id] = !S.vistas[id];
+          if (S.vistas[id]) audita("viu senha", "inventarioAcessos", S.cliId, `${cliNome(S.cliId)} · ${S.aba} · ${id.replace(/^e_|^cs_/, "")} ${S.aberto || ""}`);
+          // mantém o que foi digitado no formulário aberto
+          const vals = {};
+          document.querySelectorAll(".det input, .det select, .det textarea").forEach((x) => (vals[x.id] = x.value));
+          render();
+          Object.entries(vals).forEach(([k, v]) => {
+            const x = document.getElementById(k);
+            if (x) x.value = v;
+          });
+        },
+        async salvaItem() {
+          const sis = S.aba,
+            it = itemAtual();
+          if (!it) return;
+          const doc = clone(S.inv[sis]),
+            n = doc.itens.find((i) => i.id === it.id);
+          if (pode("inv.editar")) {
+            camposSis(sis).forEach((k) => {
+              const el = $("#e_" + k);
+              if (el) n[k] = k === "pav" ? normPav(el.value)[0] : k === "fabricante" || k === "status" ? el.value.trim().toUpperCase() : el.value.trim();
+            });
+            n.obs = $("#e_obs").value.trim();
+          }
+          let mudouAc = false;
+          if (pode("inv.acesso")) {
+            garanteAces(sis);
+            const [a, m] = leAcessosDoForm(sis, it.id);
+            if (m) {
+              S.aces[sis].acessos[it.id] = a;
+              mudouAc = true;
+              // senha trocada sem conferência: volta para "a confirmar"
+              delete n.verificado;
+              delete n.verificadoPor;
+            }
+          }
+          n.alteradoEm = agora();
+          n.alteradoPor = meuNome();
+          S.inv[sis] = doc;
+          if (await salvaSistema(sis, mudouAc)) {
+            if (mudouAc) audita("alterou senha", "inventarioAcessos", doc.id, `${cliNome(S.cliId)} · ${sis} · ${it.id}`);
+            toast("Dispositivo salvo");
+          }
+        },
+        async confirmaSel() {
+          const sel = Object.entries(S.selSen || {}).filter(([, v]) => v).map(([k]) => k.split("|"));
+          const porSis = {};
+          sel.forEach(([sis, id]) => (porSis[sis] = porSis[sis] || new Set()).add(id));
+          let n = 0;
+          const quando = agoraIso();
+          for (const [sis, ids] of Object.entries(porSis)) {
+            if (!S.inv[sis]) continue;
+            const doc = clone(S.inv[sis]);
+            doc.itens.forEach((it) => {
+              if (ids.has(it.id) && senhaPend(sis, it, S.aces)) {
+                it.verificado = quando;
+                it.verificadoPor = meuNome();
+                n++;
+              }
+            });
+            S.inv[sis] = doc;
+            if (await salvaSistema(sis)) audita("confirmou senha", "inventario", doc.id, `${cliNome(S.cliId)} · ${sis} · ${[...ids].length} dispositivos: ${[...ids].slice(0, 20).join(", ")}`);
+          }
+          S.selSen = {};
+          toast(`${n} senha${n === 1 ? "" : "s"} confirmada${n === 1 ? "" : "s"} em ${dh(quando)}`);
+          render();
+        },
+        async confirma() {
+          const sis = S.aba,
+            it = itemAtual();
+          if (!it) return;
+          const doc = clone(S.inv[sis]),
+            n = doc.itens.find((i) => i.id === it.id);
+          let mudouAc = false;
+          if (pode("inv.acesso")) {
+            garanteAces(sis);
+            const [a, m] = leAcessosDoForm(sis, it.id);
+            if (m) {
+              S.aces[sis].acessos[it.id] = a;
+              mudouAc = true;
+            }
+          }
+          n.verificado = agoraIso();
+          n.verificadoPor = meuNome();
+          S.inv[sis] = doc;
+          if (await salvaSistema(sis, mudouAc)) {
+            audita("confirmou senha", "inventario", doc.id, `${cliNome(S.cliId)} · ${sis} · ${it.id}${mudouAc ? " (senha corrigida)" : ""}`);
+            toast("Senha confirmada em " + dh(n.verificado) + (mudouAc ? " (login/senha atualizados)" : ""));
+          }
+        },
+        async excluiItem() {
+          const sis = S.aba,
+            it = itemAtual();
+          if (!it || !confirm(`Excluir o dispositivo ${it.id} (${it.tag || it.tipo})?`)) return;
+          const doc = clone(S.inv[sis]);
+          doc.itens = doc.itens.filter((i) => i.id !== it.id);
+          S.inv[sis] = doc;
+          S.aberto = "";
+          let ac = false;
+          if (S.aces[sis] && (S.aces[sis].acessos || {})[it.id]) {
+            garanteAces(sis);
+            delete S.aces[sis].acessos[it.id];
+            ac = true;
+          }
+          if (await salvaSistema(sis, ac)) {
+            audita("excluiu dispositivo", "inventario", doc.id, `${cliNome(S.cliId)} · ${it.id} · ${it.tag}`);
+            toast("Dispositivo excluído");
+          }
+        },
+        async novoItem() {
+          const sis = S.aba,
+            doc = clone(S.inv[sis]);
+          const prox = (doc.itens || []).reduce((m, a) => Math.max(m, +String(a.id).split("-").pop() || 0), 0) + 1;
+          const id = `${CODIGO[sis] || sis}-${String(prox).padStart(4, "0")}`;
+          doc.itens.push({ id, tipo: "", modelo: "", fabricante: "", tag: "", ip: "", pav: "", status: "", obs: "", origem: "cadastro manual" });
+          S.inv[sis] = doc;
+          Object.assign(S, { aberto: id, fBusca: id, fPav: "", fSt: "", fAl: false });
+          if (await salvaSistema(sis)) toast(`Dispositivo ${id} criado; preencha os dados`);
+        },
+        sit(el) {
+          // a troca da situação só vale ao clicar em Salvar (para dar tempo de escrever a justificativa)
+        },
+        async salvaAl(el) {
+          const i = +el.dataset.i,
+            a = calcAlertas(S.inv, S.meta)[i];
+          if (!a) return;
+          const sit = document.querySelector(`.sitsel[data-i="${i}"]`).value,
+            just = $("#aj_" + i).value.trim();
+          await salvaMeta((m) => {
+            m.decisoes = m.decisoes || {};
+            if (sit === "PENDENTE" && !just) delete m.decisoes[a.chave];
+            else m.decisoes[a.chave] = { sit, just, por: meuNome(), data: bd(hoje()) };
+          });
+          toast(sit === "OK" ? "Alerta marcado como OK (sai das contagens)" : "Alerta salvo");
+          render();
+        },
+        async salvaLeg() {
+          const leg = {};
+          document.querySelectorAll("[data-leg]").forEach((x) => {
+            if (x.value.trim()) leg[x.dataset.leg] = x.value.trim();
+          });
+          if (await salvaMeta((m) => (m.legenda = leg))) toast("Legenda salva");
+        },
+        async excluiInv() {
+          const nome = cliNome(S.cliId);
+          if (!confirm(`Excluir TODO o inventário de ${nome}? Isso apaga dispositivos, senhas, alertas e legenda.`)) return;
+          if (prompt('Para confirmar, digite EXCLUIR') !== "EXCLUIR") return;
+          try {
+            for (const sis of Object.keys(S.inv)) {
+              await DB.del("inventario", S.inv[sis].id);
+              await DB.del("inventarioAcessos", S.inv[sis].id).catch(() => {});
+            }
+            await DB.del("inventarioMeta", S.cliId);
+            audita("excluiu inventário", "inventarioMeta", S.cliId, nome);
+            toast("Inventário excluído");
+            go("lista");
+          } catch (e) {
+            toast("Não consegui excluir: " + (e.code || e.message));
+          }
+        },
+        async impSalva() {
+          const I = S.imp;
+          if (!I.res || !I.cliId) return;
+          const cli = S.clientes.find((c) => c.id === I.cliId);
+          if (!cli) return toast("Escolha o cliente");
+          I.salvando = true;
+          render();
+          try {
+            const eqId = cli.equipeId || "";
+            const meta0 = (await DB.get("inventarioMeta", cli.id)) || null;
+            const antigos = {},
+              antAces = {};
+            for (const d of await DB.list("inventario", { clienteId: cli.id })) antigos[d.sistema] = d;
+            for (const d of await DB.list("inventarioAcessos", { clienteId: cli.id })) antAces[d.sistema] = d;
+            const inv = montaInventario(I.res, antigos, antAces);
+            const novoAces = {};
+            const novoInv = {};
+            for (const [sis, itens] of Object.entries(inv)) {
+              const id = docId(cli.id, sis);
+              const blocos = I.res.centrais[sis] || {};
+              const pub = [],
+                sens = {};
+              for (const [nome, campos] of Object.entries(blocos)) {
+                if (nome.startsWith("CENTRAL ")) {
+                  if (campos.length) sens[nome] = campos;
+                  continue;
+                }
+                const p = campos.filter(([k]) => !RE_SENHA.test(k)),
+                  s = campos.filter(([k]) => RE_SENHA.test(k));
+                pub.push({ nome, campos: p });
+                if (s.length) sens[nome] = s;
+              }
+              Object.keys(sens).forEach((nome) => {
+                if (!pub.some((c) => c.nome === nome)) pub.push({ nome, campos: [] });
+              });
+              const acessos = {};
+              const limpos = itens.map((it) => {
+                const a = {};
+                ACESSO.forEach((k) => {
+                  if (it[k]) a[k] = it[k];
+                });
+                if (Object.keys(a).length) acessos[it.id] = a;
+                const n = { ...it };
+                ACESSO.forEach((k) => delete n[k]);
+                return n;
+              });
+              const fab = Object.entries(limpos.reduce((o, i) => ((o[i.fabricante] = (o[i.fabricante] || 0) + (i.fabricante ? 1 : 0)), o), {})).sort((a, b) => b[1] - a[1])[0];
+              novoInv[sis] = { id, clienteId: cli.id, equipeId: eqId, sistema: sis, fabricante: fab ? fab[0] : "", itens: limpos, centrais: pub, atualizadoEm: agora(), atualizadoPor: meuNome() };
+              await DB.set("inventario", id, novoInv[sis]);
+              novoAces[sis] = { id, clienteId: cli.id, equipeId: eqId, sistema: sis, acessos, centrais: sens };
+              await DB.set("inventarioAcessos", id, novoAces[sis]);
+            }
+            for (const sis of Object.keys(antigos))
+              if (!novoInv[sis]) {
+                await DB.del("inventario", antigos[sis].id);
+                await DB.del("inventarioAcessos", antigos[sis].id).catch(() => {});
+              }
+            const meta = {
+              id: cli.id,
+              clienteId: cli.id,
+              clienteNome: cli.unidade || "",
+              equipeId: eqId,
+              versao: ((meta0 && meta0.versao) || 0) + 1,
+              origem: I.nome,
+              nomeNaPlanilha: I.res.cliente,
+              importadoEm: agora(),
+              importadoPor: meuNome(),
+              atualizadoEm: agora(),
+              atualizadoPor: meuNome(),
+              importAlertas: [...new Map(I.res.importAlertas.map((x) => [x.chave, x])).values()],
+              equivalencias: I.res.equivalencias,
+              decisoes: (meta0 && meta0.decisoes) || {},
+              legenda: (meta0 && meta0.legenda) || {},
+            };
+            meta.resumo = resumo(novoInv, meta, novoAces);
+            await DB.set("inventarioMeta", cli.id, meta);
+            audita("importou inventário", "inventarioMeta", cli.id, `${cli.unidade} · v${meta.versao} · ${I.nome} · ${meta.resumo.total} dispositivos`);
+            toast(`Inventário salvo: ${meta.resumo.total} dispositivos (v${meta.versao})`);
+            S.imp = { cliId: "", nome: "", res: null, erro: "", salvando: false };
+            abreCliente(cli.id);
+          } catch (e) {
+            console.error(e);
+            I.salvando = false;
+            I.erro = "Não consegui salvar: " + (e.code === "permission-denied" ? "sem permissão (confira as regras do Firestore)" : e.code || e.message);
+            render();
+          }
+        },
+        exporta() {
+          exportaExcel();
+        },
+      };
+
+      /* exportação simples para Excel (uma aba por sistema). A planilha completa com painel vem na próxima etapa. */
+      function exportaExcel() {
+        if (typeof XLSX === "undefined") return toast("A biblioteca do Excel não carregou. Confira a internet.");
+        const cli = cliNome(S.cliId),
+          leg = (S.meta && S.meta.legenda) || {},
+          senhas = pode("inv.acesso");
+        const wb = XLSX.utils.book_new();
+        for (const sis of [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))]) {
+          const ac = (S.aces[sis] || {}).acessos || {};
+          const cols = ["id", "tipo", "modelo", "fabricante", "tag", "ip", "pav", ...(EXTRAS[sis] || []), "status", ...(senhas ? ["login", "senha", ...(temAcesso2(sis) ? ["login2", "senha2"] : [])] : []), "obs"];
+          const linhas = (S.inv[sis].itens || []).map((it) => {
+            const o = {};
+            cols.forEach((k) => {
+              o[rotSis(sis, k)] = ACESSO.includes(k) ? (ac[it.id] || {})[k] || "" : it[k] || "";
+              if (k === "tipo" && leg[sis + "|" + it.tipo]) o["Descrição do tipo"] = leg[sis + "|" + it.tipo];
+            });
+            o["Senha confirmada em"] = dh(it.verificado) || (senhaPend(sis, it, S.aces) ? "A CONFIRMAR" : "");
+            o["Confirmado por"] = it.verificadoPor || "";
+            return o;
+          });
+          const ws = XLSX.utils.json_to_sheet(linhas);
+          ws["!cols"] = Object.keys(linhas[0] || {}).map((k) => ({ wch: Math.min(40, Math.max(8, k.length + 2, ...linhas.map((l) => String(l[k] || "").length + 1))) }));
+          XLSX.utils.book_append_sheet(wb, ws, sis.slice(0, 31));
+        }
+        const al = calcAlertas(S.inv, S.meta).map((a) => ({ Sistema: a.sis, Alerta: a.tipo, "TAG / Item": a.tag, Detalhe: a.texto, Dispositivos: a.ids.join(", "), "Situação": a.sit, Justificativa: a.just, "Conferido por": a.por, Data: a.data }));
+        if (al.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(al), "Alertas");
+        XLSX.writeFile(wb, `Inventario_${semAcento(cli).replace(/[^A-Za-z0-9]+/g, "_")}${senhas ? "" : "_SEM_SENHAS"}_${hoje()}.xlsx`);
+        audita("exportou inventário", "inventarioMeta", S.cliId, `${cli}${senhas ? " (com senhas)" : ""}`);
+      }
+
+      /* leitura do arquivo escolhido na importação */
+      async function leArquivo(f) {
+        const I = S.imp;
+        I.erro = "";
+        I.res = null;
+        I.nome = f.name;
+        render();
+        try {
+          if (typeof XLSX === "undefined") throw new Error("a biblioteca do Excel não carregou (confira a internet)");
+          const buf = await f.arrayBuffer();
+          const wbx = XLSX.read(buf, { type: "array" });
+          const res = lerPlanilha(wbx);
+          if (!Object.keys(res.sistemas).length) throw new Error("não achei abas de sistema (CFTV, SCA, SAI, SDAI, AUTOMAÇÃO, SONORIZAÇÃO)");
+          const meta0 = S.metas.find((m) => m.clienteId === I.cliId);
+          const antigos = {},
+            antAces = {};
+          if (meta0) {
+            for (const d of await DB.list("inventario", { clienteId: I.cliId })) antigos[d.sistema] = d;
+            for (const d of await DB.list("inventarioAcessos", { clienteId: I.cliId })) antAces[d.sistema] = d;
+          }
+          res.inv = montaInventario(res, antigos, antAces);
+          I.res = res;
+          if (!I.cliId) {
+            const alvo = semAcento(res.cliente).toUpperCase().replace(/^ED\.?\s*/, "").replace(/[^A-Z0-9]/g, "");
+            const c = S.clientes.find((c) => alvo && semAcento(c.unidade).toUpperCase().replace(/[^A-Z0-9]/g, "").includes(alvo));
+            if (c) I.cliId = c.id;
+          }
+        } catch (e) {
+          console.error(e);
+          I.erro = "Não consegui ler a planilha: " + e.message;
+        }
+        render();
+      }
+
+      /* ==================================================================
+   10. EVENTOS
+   ================================================================== */
+      document.addEventListener("click", (ev) => {
+        const v = ev.target.closest("[data-v]");
+        if (v) {
+          ev.preventDefault();
+          return go(v.dataset.v);
+        }
+        const ab = ev.target.closest("[data-aba]");
+        if (ab) {
+          Object.assign(S, { aba: ab.dataset.aba, aberto: "", fBusca: "", fPav: "", fSt: "", fAl: false, fSp: false, lim: 200, selSen: {} });
+          return render(false);
+        }
+        const a = ev.target.closest("[data-a]");
+        if (!a || a.tagName === "SELECT" || a.tagName === "DETAILS") return;
+        const fn = ACOES[a.dataset.a];
+        if (fn) {
+          if (a.tagName === "A" || a.tagName === "BUTTON") ev.preventDefault();
+          ev.stopPropagation();
+          fn(a, ev);
+        }
+      });
+      document.addEventListener("toggle", (ev) => {
+        if (ev.target.matches && ev.target.matches('details[data-a="centT"]')) S.centAb = ev.target.open;
+        if (ev.target.matches && ev.target.matches("details[data-g]")) (S.grAb = S.grAb || {})[ev.target.dataset.g] = ev.target.open;
+      }, true);
+      let tBusca = null;
+      document.addEventListener("input", (ev) => {
+        const f = ev.target.dataset && ev.target.dataset.f;
+        if (f === "busca" || f === "fBusca") {
+          S[f] = ev.target.value;
+          S.lim = 200;
+          clearTimeout(tBusca);
+          tBusca = setTimeout(() => render(), 180);
+        }
+      });
+      document.addEventListener("change", (ev) => {
+        const t = ev.target;
+        if (t.id === "eqsel") {
+          S.eqSel = t.value;
+          escutaBase();
+          if (S.view === "cliente") go("lista");
+          return;
+        }
+        if (t.id === "impCli") {
+          S.imp.cliId = t.value;
+          return render();
+        }
+        if (t.id === "impArq" && t.files && t.files[0]) return leArquivo(t.files[0]);
+        const f = t.dataset && t.dataset.f;
+        if (f === "fPav" || f === "fSt") {
+          S[f] = t.value;
+          S.lim = 200;
+          return render();
+        }
+        if (f === "fAl" || f === "fSp") {
+          S[f] = t.checked;
+          return render();
+        }
+        if (t.dataset && t.dataset.sel) {
+          S.selSen = S.selSen || {};
+          S.selSen[t.dataset.sel] = t.checked;
+          return render();
+        }
+        if (t.dataset && t.dataset.selg) {
+          S.selSen = S.selSen || {};
+          t.dataset.selg.split(",").forEach((k) => (S.selSen[k] = t.checked));
+          return render();
+        }
+      });
+      boot();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,40 @@
+    // ================= INVENTÁRIO (inventario.html) =================
+    // Cole este bloco DENTRO de "match /databases/{database}/documents { ... }" das regras atuais
+    // (Console do Firebase > Firestore > Regras), sem apagar o que já existe, e clique em Publicar.
+    // Admin: tudo (importar, criar, excluir). Supervisor e técnico: só ler e alterar o que é da própria equipe.
+    function invPerfil() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+    function invAtivo() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && invPerfil().get('ativo', true) != false;
+    }
+    function invAdmin() {
+      return invAtivo() && invPerfil().get('papel', '') == 'admin';
+    }
+    function invDaEquipe(eq) {
+      return invAtivo() && invPerfil().get('equipeId', '') == eq;
+    }
+    // alteração sem trocar o documento de equipe nem de cliente
+    function invAlteraNaEquipe() {
+      return invDaEquipe(resource.data.equipeId)
+        && request.resource.data.equipeId == resource.data.equipeId
+        && request.resource.data.clienteId == resource.data.clienteId;
+    }
+    match /inventario/{id} {
+      allow read: if invAdmin() || invDaEquipe(resource.data.equipeId);
+      allow create, delete: if invAdmin();
+      allow update: if invAdmin() || invAlteraNaEquipe();
+    }
+    match /inventarioAcessos/{id} {
+      allow read: if invAdmin() || invDaEquipe(resource.data.equipeId);
+      allow create, delete: if invAdmin();
+      allow update: if invAdmin() || invAlteraNaEquipe();
+    }
+    match /inventarioMeta/{id} {
+      allow read: if invAdmin() || invDaEquipe(resource.data.equipeId);
+      allow create, delete: if invAdmin();
+      allow update: if invAdmin() || invAlteraNaEquipe();
+    }
+    // ================= fim do INVENTÁRIO =================
