@@ -2923,6 +2923,59 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           alAt = al.filter(alertaAtivo),
           r = resumo(S.inv, m, S.aces);
         const pend = S.pend || [];
+        // colunas de cada aba de sistema (o painel usa as mesmas letras nas fórmulas)
+        const colsSis = (sis) => [
+          ["id", "ID", 11],
+          ["tipo", "Tipo", 18],
+          ["cat", "Tipo no catálogo", 22],
+          ["modelo", "Modelo", 18],
+          ["fabricante", "Fabricante", 13],
+          ["tag", "TAG", 34],
+          ["ip", "IP", 15],
+          ["pav", "Pavimento", 11],
+          ...(EXTRAS[sis] || []).map((k) => [k, ROT[k], 9]),
+          ["status", "Status", 12],
+          ["pend", "Pendências em aberto", 12],
+          ["sconf", "Senha confirmada em", 17],
+          ...(semSenhas ? [] : ["login", "senha", ...(temAcesso2(sis) ? ["login2", "senha2"] : [])].map((k) => [k, rotSis(sis, k), 14])),
+          ["obs", "Observação", 30],
+        ];
+        const letra = (sis, k) => colL(colsSis(sis).findIndex(([x]) => x === k) + 1);
+        const aba = (sis) => `'${sis.replace(/'/g, "''")}'`;
+        const FIMF = 5000; // as fórmulas cobrem até a linha 5000 (espaço para crescer)
+        // data do Excel sem fuso (dia certo em qualquer computador)
+        const dUTC = (iso) => {
+          const m_ = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+          return m_ ? new Date(Date.UTC(+m_[1], +m_[2] - 1, +m_[3])) : null;
+        };
+        const hojeUTC = dUTC(hoje());
+        const lista = (ws, ref, itens) => {
+          try {
+            ws.dataValidations.add(ref, { type: "list", allowBlank: true, formulae: ['"' + itens.join(",") + '"'] });
+          } catch (e) {
+            console.warn("validação", e);
+          }
+        };
+        // aba Pendências: colunas fixas (as fórmulas das outras abas apontam para elas)
+        const PC = { id: "A", ab: "B", sis: "C", disp: "D", tag: "E", pav: "F", cat: "G", tit: "H", prob: "I", stDiario: "J", prio: "K", por: "L", sit: "M", conc: "N", concPor: "O", sol: "P", dias: "Q", prazo: "R", vence: "S", noPrazo: "T" };
+        const PR = (c) => `Pendências!$${PC[c]}$5:$${PC[c]}$2000`;
+        const SLA_PAD = [
+          ["ALTA", 2],
+          ["MÉDIA", 7],
+          ["BAIXA", 15],
+        ];
+        // pendências na ordem da aba, já com os valores que as fórmulas vão calcular (para o arquivo abrir com números)
+        const ordP = pend.slice().sort((a, b) => (a.aberta === b.aberta ? String(b.criada || "").localeCompare(String(a.criada || "")) : a.aberta ? -1 : 1));
+        const calcP = ordP.map((p) => {
+          const ab = dUTC(p.criada),
+            co = p.aberta ? null : dUTC(p.concluidaEm);
+          const prio = p.prioridade ? String(p.prioridade).toUpperCase() : "MÉDIA";
+          const prazo = (SLA_PAD.find(([x]) => x === prio) || [])[1] ?? "";
+          const dias = ab ? Math.round(((co || hojeUTC) - ab) / 864e5) : "";
+          const vence = ab && prazo !== "" ? new Date(ab.getTime() + prazo * 864e5) : null;
+          const noPrazo = !vence ? "" : !p.aberta ? (co && co <= vence ? "NO PRAZO" : "ATRASADA") : hojeUTC > vence ? "ATRASADA" : "NO PRAZO";
+          return { p, ab, co, prio, prazo, dias, vence, noPrazo, ids: pendDisp(p) };
+        });
         const wb = new ExcelJS.Workbook();
         wb.creator = "Diário Técnico · Controller BMS";
         wb.created = new Date();
@@ -3034,15 +3087,18 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const ok = (r.status.ONLINE || 0) + (r.status.OPERANDO || 0),
           base = r.total - (r.status.VAZIO || 0) - (r.status["-"] || 0);
         const pendAb = pend.filter((p) => p.aberta).length;
+        const R = 14 + 4 * 16 + 2, // linha da faixa "Resumo por sistema"
+          TL = R + 2 + sists.length; // linha do total do resumo
+        const concl = calcP.filter((x) => !x.p.aberta);
         const quadros = [
-          ["Dispositivos", r.total, "F2F2F2", XC.grafite, "0"],
-          ["Disponibilidade", base ? ok / base : 0, "E2F0D9", "006100", "0.0%"],
-          ["Falha / Offline", (r.status.FALHA || 0) + (r.status.OFFLINE || 0), "FDE9E7", "9C0006", "0"],
-          ["Verificar", r.status.VERIFICAR || 0, "FFF4D6", "7F5F00", "0"],
-          ["Senhas a confirmar", r.senhasPend, "FDE9E7", "9C0006", "0"],
-          ["Senhas confirmadas", r.verificados, "E2F0D9", "006100", "0"],
-          ["Pendências em aberto", pendAb, "FCE4D6", "843C0C", "0"],
-          ["Alertas a conferir", alAt.length, "FCE4D6", "843C0C", "0"],
+          ["Dispositivos", { formula: `C${TL}`, result: r.total }, "F2F2F2", XC.grafite, "0"],
+          ["Disponibilidade", { formula: `O${TL}`, result: base ? ok / base : 0 }, "E2F0D9", "006100", "0.0%"],
+          ["Falha / Offline", { formula: `I${TL}`, result: (r.status.FALHA || 0) + (r.status.OFFLINE || 0) }, "FDE9E7", "9C0006", "0"],
+          ["Senhas a confirmar", { formula: `K${TL}`, result: r.senhasPend }, "FDE9E7", "9C0006", "0"],
+          ["Pendências em aberto", { formula: `M${TL}`, result: pendAb }, "FCE4D6", "843C0C", "0"],
+          ["Pendências atrasadas", { formula: `COUNTIFS(${PR("sit")},"EM ABERTO",${PR("noPrazo")},"ATRASADA")`, result: calcP.filter((x) => x.p.aberta && x.noPrazo === "ATRASADA").length }, "FDE9E7", "9C0006", "0"],
+          ["Concluídas no prazo", { formula: `IFERROR(COUNTIFS(${PR("sit")},"CONCLUÍDA",${PR("noPrazo")},"NO PRAZO")/COUNTIF(${PR("sit")},"CONCLUÍDA"),"-")`, result: concl.length ? concl.filter((x) => x.noPrazo === "NO PRAZO").length / concl.length : "-" }, "E2F0D9", "006100", "0%"],
+          ["Alertas a conferir", { formula: `COUNTIF(Alertas!$A$4:$A$2000,"PENDENTE")+COUNTIF(Alertas!$A$4:$A$2000,"NOK")`, result: alAt.length }, "FCE4D6", "843C0C", "0"],
         ];
         quadros.forEach(([rot, v, bg, fg, fmt], k) => quadro(P, 12, 1 + 2 * k, rot, v, bg, fg, fmt, 2));
         P.getRow(12).height = 26;
@@ -3101,8 +3157,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const id = wb.addImage({ base64: b64, extension: "png" });
           P.addImage(id, { tl: { col: k % 2 ? 8.1 : 0, row: 14.3 + Math.floor(k / 2) * 16 }, ext: { width: 600, height: 282 } });
         });
-        // resumo por sistema
-        const R = 14 + 4 * 16 + 2;
+        // resumo por sistema: tudo por fórmula, olhando as abas de cada sistema e a aba Pendências
         faixa(P, R, 1, 16, "RESUMO POR SISTEMA", 11, 22);
         const hres = ["Sistema", "Total", "Online / Operando", "Verificar", "Falha / Offline", "Senhas a confirmar", "Pendências em aberto", "Disponibilidade"];
         hres.forEach((h, k) => {
@@ -3115,10 +3170,24 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             T = !x;
           const tt = T ? porSis.reduce((a, y) => ({ s: "Total", total: a.total + y.total, ok: a.ok + y.ok, ver: a.ver + y.ver, falha: a.falha + y.falha, vazio: a.vazio + y.vazio, aconf: a.aconf + y.aconf, pend: a.pend + y.pend }), { total: 0, ok: 0, ver: 0, falha: 0, vazio: 0, aconf: 0, pend: 0 }) : x;
           const b = tt.ok + tt.ver + tt.falha; // mesma conta do quadro: sem vazios e sem "sem status"
+          const s_ = T ? "" : x.s;
+          const faixaSt = T ? "" : `${aba(s_)}!$${letra(s_, "status")}$10:$${letra(s_, "status")}$${FIMF}`;
+          const forms = T
+            ? [null, ...["C", "E", "G", "I", "K", "M"].map((cl) => `SUM(${cl}${R + 2}:${cl}${lin - 1})`), `IFERROR(E${lin}/(E${lin}+G${lin}+I${lin}),0)`]
+            : [
+                null,
+                `COUNTA(${aba(s_)}!$A$10:$A$${FIMF})`,
+                `COUNTIF(${faixaSt},"ONLINE")+COUNTIF(${faixaSt},"OPERANDO")`,
+                `COUNTIF(${faixaSt},"VERIFICAR")`,
+                `COUNTIF(${faixaSt},"FALHA")+COUNTIF(${faixaSt},"OFFLINE")`,
+                `COUNTIF(${aba(s_)}!$${letra(s_, "sconf")}$10:$${letra(s_, "sconf")}$${FIMF},"A CONFIRMAR")`,
+                `COUNTIFS(${PR("sis")},"${s_}",${PR("sit")},"EM ABERTO")`,
+                `IFERROR(E${lin}/(E${lin}+G${lin}+I${lin}),0)`,
+              ];
           [tt.s, tt.total, tt.ok, tt.ver, tt.falha, tt.aconf, tt.pend, b ? tt.ok / b : 0].forEach((v, k) => {
             P.mergeCells(lin, 1 + 2 * k, lin, 2 + 2 * k);
             const c = P.getCell(lin, 1 + 2 * k);
-            c.value = v;
+            c.value = forms[k] ? { formula: forms[k], result: v } : v;
             c.font = xFont({ bold: T || k === 0 });
             c.alignment = { horizontal: k ? "center" : "left" };
             if (k === 7) c.numFmt = "0.0%";
@@ -3128,7 +3197,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             }
           });
         });
-        P.getCell(R + 4 + porSis.length, 1).value = "Disponibilidade = Online/Operando ÷ (total − vazios − sem status). Gráficos e quadros mostram a situação no momento da exportação.";
+        P.getCell(R + 4 + porSis.length, 1).value = "Disponibilidade = Online/Operando ÷ (online + verificar + falha). Quadros e resumo são fórmulas: mudam se você alterar status ou pendências nas abas. Os gráficos são imagens com a situação do momento da exportação.";
         P.getCell(R + 4 + porSis.length, 1).font = xFont({ size: 9, italic: true, color: "7F7F7F" });
 
         /* ---------- abas por sistema ---------- */
@@ -3137,22 +3206,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const doc = S.inv[sis],
             itens = doc.itens || [],
             ac = (S.aces[sis] || {}).acessos || {};
-          const cols = [
-            ["id", "ID", 11],
-            ["tipo", "Tipo", 18],
-            ["cat", "Tipo no catálogo", 22],
-            ["modelo", "Modelo", 18],
-            ["fabricante", "Fabricante", 13],
-            ["tag", "TAG", 34],
-            ["ip", "IP", 15],
-            ["pav", "Pavimento", 11],
-            ...(EXTRAS[sis] || []).map((k) => [k, ROT[k], 9]),
-            ["status", "Status", 12],
-            ["pend", "Pendências em aberto", 12],
-            ["sconf", "Senha confirmada em", 17],
-            ...(semSenhas ? [] : ["login", "senha", ...(temAcesso2(sis) ? ["login2", "senha2"] : [])].map((k) => [k, rotSis(sis, k), 14])),
-            ["obs", "Observação", 30],
-          ];
+          const cols = colsSis(sis);
           const n = cols.length,
             W = nova(sis, { frz: 9 });
           cols.forEach(([, , w], i) => (W.getColumn(i + 1).width = w));
@@ -3173,8 +3227,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           quadro(W, 6, 3, "Verificar", { formula: `COUNTIF(${st}10:${st}${fim},"VERIFICAR")`, result: cnt((i) => i.status === "VERIFICAR") }, ...XC.ver, "0");
           quadro(W, 6, 4, "Falha / Offline", { formula: `COUNTIF(${st}10:${st}${fim},"FALHA")+COUNTIF(${st}10:${st}${fim},"OFFLINE")`, result: cnt((i) => ["FALHA", "OFFLINE"].includes(i.status)) }, ...XC.falha, "0");
           quadro(W, 6, 5, "Vazio", { formula: `COUNTIF(${st}10:${st}${fim},"VAZIO")`, result: cnt((i) => i.status === "VAZIO") }, ...XC.vazio, "0");
-          quadro(W, 6, 6, "Senhas a confirmar", cnt((i) => senhaPend(sis, i, S.aces)), "FDE9E7", "9C0006", "0");
-          quadro(W, 6, 7, "Com pendência", cnt((i) => (pendPorId.get(i.id) || []).some((p) => p.aberta)), "FCE4D6", "843C0C", "0");
+          const sc = colL(ci.sconf),
+            pdc = colL(ci.pend);
+          quadro(W, 6, 6, "Senhas a confirmar", { formula: `COUNTIF(${sc}10:${sc}${FIMF},"A CONFIRMAR")`, result: cnt((i) => senhaPend(sis, i, S.aces)) }, "FDE9E7", "9C0006", "0");
+          quadro(W, 6, 7, "Com pendência", { formula: `COUNTIF(${pdc}10:${pdc}${FIMF},">0")`, result: cnt((i) => (pendPorId.get(i.id) || []).some((p) => p.aberta)) }, "FCE4D6", "843C0C", "0");
           W.getRow(6).height = 26;
           W.getRow(7).height = 30;
           cols.forEach(([k, t], i) => cab(W, 9, i + 1, t, ACESSO.includes(k) ? XC.acesso : XC.cinza));
@@ -3187,7 +3243,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               ...it,
               tipo: it.tipo + (leg[sis + "|" + it.tipo] ? ` (${leg[sis + "|" + it.tipo]})` : ""),
               cat: tc ? tc.nome : "SEM CATÁLOGO",
-              pend: (pendPorId.get(it.id) || []).filter((p) => p.aberta).length || "",
+              // conta na aba Pendências as pendências EM ABERTO que citam este ID (muda sozinho se a situação mudar)
+              pend: { formula: `IF($A${lin}="","",COUNTIFS(${PR("disp")},"*"&$A${lin}&"*",${PR("sit")},"EM ABERTO"))`, result: (pendPorId.get(it.id) || []).filter((p) => p.aberta).length },
               sconf: it.verificado ? dh(it.verificado) : senhaPend(sis, it, S.aces) ? "A CONFIRMAR" : "",
               login: a.login,
               senha: a.senha,
@@ -3199,63 +3256,156 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               let x = v[k] ?? "";
               if ((k === "nvr" || k === "canal") && /^\d+$/.test(String(x))) x = +x;
               c.value = x === "" ? null : x;
-              c.font = xFont({ bold: k === "pend" && !!x, color: k === "pend" && x ? "C00000" : k === "sconf" && x === "A CONFIRMAR" ? "9C0006" : k === "cat" && x === "SEM CATÁLOGO" ? "C00000" : "000000" });
+              c.font = xFont({ color: k === "sconf" && x === "A CONFIRMAR" ? "9C0006" : k === "cat" && x === "SEM CATÁLOGO" ? "C00000" : "000000" });
+              if (k === "pend") c.numFmt = '0;-0;""';
               c.border = xBorda;
               c.alignment = { vertical: "middle", horizontal: ["id", "pav", "nvr", "canal", "laco", "status", "pend", "sconf"].includes(k) ? "center" : "left" };
               if (j % 2) c.fill = xFill(XC.zebra);
             });
           });
           statusCF(W, `${st}10:${st}${fim + 200}`, `${st}10`);
+          // pendência em aberto: número em vermelho e a linha do dispositivo em rosa (como no modelo)
+          W.addConditionalFormatting({
+            ref: `${pdc}10:${pdc}${FIMF}`,
+            rules: [{ type: "expression", priority: 1, formulae: [`AND(ISNUMBER(${pdc}10),${pdc}10>0)`], style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FFC00000" } }, font: { bold: true, color: { argb: "FFFFFFFF" } } } }],
+          });
+          W.addConditionalFormatting({
+            ref: `A10:${colL(n)}${FIMF}`,
+            rules: [{ type: "expression", priority: 9, formulae: [`AND(ISNUMBER($${pdc}10),$${pdc}10>0)`], style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FFFDECEC" } } } }],
+          });
+          lista(W, `${st}10:${st}${FIMF}`, STATUS);
           W.autoFilter = { from: { row: 9, column: 1 }, to: { row: fim, column: n } };
           W.pageSetup.printTitlesRow = "9:9";
         }
 
-        /* ---------- Pendências do diário ---------- */
+        /* ---------- Pendências do diário (com dias, prazo e situação por fórmula) ---------- */
         const PD = nova("Pendências", { frz: 4 });
         if (logoId !== null) PD.addImage(logoId, { tl: { col: 0, row: 0.1 }, ext: { width: 200, height: 27 } });
         const pc = [
-          ["Situação", 12],
-          ["Aberta em", 11],
-          ["Sistema", 13],
-          ["Tipo no catálogo", 22],
-          ["Título", 34],
-          ["Problema", 40],
-          ["Status", 18],
-          ["Aberta por", 16],
-          ["Concluída em", 12],
-          ["Concluída por", 16],
-          ["Solução", 40],
-          ["Dias", 7],
-          ["Dispositivo(s)", 22],
+          ["id", "ID", 10],
+          ["ab", "Aberta em", 11],
+          ["sis", "Sistema", 13],
+          ["disp", "Dispositivo(s)", 20],
+          ["tag", "TAG", 26],
+          ["pav", "Pavimento", 10],
+          ["cat", "Tipo no catálogo", 22],
+          ["tit", "Título", 32],
+          ["prob", "Problema", 36],
+          ["stDiario", "Status no diário", 18],
+          ["prio", "Prioridade", 10],
+          ["por", "Aberta por", 15],
+          ["sit", "Situação", 12],
+          ["conc", "Conclusão", 11],
+          ["concPor", "Concluída por", 15],
+          ["sol", "Solução", 36],
+          ["dias", "Dias", 7],
+          ["prazo", "Prazo (dias)", 9],
+          ["vence", "Vence em", 11],
+          ["noPrazo", "Prazo", 12],
         ];
         faixa(PD, 3, 1, pc.length, `${nome.toUpperCase()} | PENDÊNCIAS DO DIÁRIO`, 14, 28);
-        pc.forEach(([h, w], i) => {
+        PD.getCell(1, 5).value = "Vêm do diário. Situação e Prioridade podem ser trocadas aqui: Dias, Prazo e os números das outras abas recalculam sozinhos.";
+        PD.getCell(1, 5).font = xFont({ size: 9, italic: true, color: "7F7F7F" });
+        pc.forEach(([k, h, w], i) => {
           PD.getColumn(i + 1).width = w;
-          cab(PD, 4, i + 1, h);
+          cab(PD, 4, i + 1, h, ["dias", "prazo", "vence", "noPrazo"].includes(k) ? XC.cfg : XC.cinza);
         });
-        const ord = pend.slice().sort((a, b) => (a.aberta === b.aberta ? String(b.criada || "").localeCompare(String(a.criada || "")) : a.aberta ? -1 : 1));
-        ord.forEach((p, j) => {
-          const t = tipoCat(p.tipoId),
-            ids = pendDisp(p);
-          const dias = p.criada ? Math.round(((p.aberta ? new Date() : new Date(p.concluidaEm || p.criada)) - new Date(p.criada)) / 864e5) : "";
-          [p.aberta ? "EM ABERTO" : "CONCLUÍDA", bd(p.criada), pendSis(p), t ? t.nome : "", p.titulo || "", p.problema || "", p.status || "", p.criadaPorNome || "", bd(p.concluidaEm), p.concluidaPorNome || "", p.solucao || "", dias, ids.join(", ")].forEach((v, i) => {
-            const c = PD.getCell(5 + j, i + 1);
-            c.value = v === "" ? null : v;
-            c.font = xFont({ bold: i === 0 });
+        PD.getRow(4).height = 24;
+        const extra = 50; // linhas a mais já com as fórmulas, para quem quiser acrescentar
+        for (let j = 0; j < calcP.length + extra; j++) {
+          const lin = 5 + j,
+            x = calcP[j];
+          const p = x ? x.p : null;
+          const ref = (c) => `${PC[c]}${lin}`;
+          const t = p ? tipoCat(p.tipoId) : null,
+            d0 = x && x.ids.length ? Object.values(S.inv).flatMap((dd) => dd.itens || []).find((i) => i.id === x.ids[0]) : null;
+          const val = {
+            id: p ? String(p.id).slice(-6).toUpperCase() : null,
+            ab: x ? x.ab : null,
+            sis: p ? pendSis(p) : null,
+            disp: x && x.ids.length ? x.ids.join(", ") : null,
+            tag: d0 ? d0.tag : null,
+            pav: d0 ? d0.pav : null,
+            cat: t ? t.nome : null,
+            tit: p ? p.titulo || "(sem título)" : null,
+            prob: p ? p.problema || null : null,
+            stDiario: p ? p.status || null : null,
+            prio: x ? x.prio : null,
+            por: p ? p.criadaPorNome || null : null,
+            sit: p ? (p.aberta ? "EM ABERTO" : "CONCLUÍDA") : null,
+            conc: x ? x.co : null,
+            concPor: p ? p.concluidaPorNome || null : null,
+            sol: p ? p.solucao || null : null,
+            dias: { formula: `IF(${ref("ab")}="","",IF(${ref("conc")}="",TODAY()-${ref("ab")},${ref("conc")}-${ref("ab")}))`, result: x ? x.dias : "" },
+            prazo: { formula: `IF(${ref("prio")}="","",IFERROR(INDEX($W$5:$W$7,MATCH(${ref("prio")},$V$5:$V$7,0)),""))`, result: x ? x.prazo : "" },
+            vence: { formula: `IF(OR(${ref("ab")}="",${ref("prazo")}=""),"",${ref("ab")}+${ref("prazo")})`, result: x && x.vence ? x.vence : "" },
+            noPrazo: {
+              formula: `IF(${ref("vence")}="","",IF(${ref("sit")}="CONCLUÍDA",IF(${ref("conc")}<=${ref("vence")},"NO PRAZO","ATRASADA"),IF(TODAY()>${ref("vence")},"ATRASADA","NO PRAZO")))`,
+              result: x ? x.noPrazo : "",
+            },
+          };
+          pc.forEach(([k], i) => {
+            const c = PD.getCell(lin, i + 1);
+            c.value = val[k];
             c.border = xBorda;
-            c.alignment = { vertical: "top", wrapText: [4, 5, 10].includes(i), horizontal: [0, 1, 8, 11].includes(i) ? "center" : "left" };
-            if (j % 2) c.fill = xFill(XC.zebra);
+            c.font = xFont({ bold: k === "sit" || k === "noPrazo" });
+            c.alignment = { vertical: "top", wrapText: ["tit", "prob", "sol", "disp"].includes(k), horizontal: ["id", "ab", "pav", "prio", "sit", "conc", "dias", "prazo", "vence", "noPrazo"].includes(k) ? "center" : "left" };
+            if (["ab", "conc", "vence"].includes(k)) c.numFmt = "dd/mm/yyyy";
+            if (k === "dias" || k === "prazo") c.numFmt = "0";
+            if (k === "prio" && p) c.fill = xFill(XC.amarelo);
+            else if (p && j % 2) c.fill = xFill(XC.zebra);
           });
-        });
+        }
+        const fimP = 5 + calcP.length + extra - 1;
+        const cfSit = (col, pares) =>
+          PD.addConditionalFormatting({
+            ref: `${col}5:${col}${fimP}`,
+            rules: pares.map(([v, [bg, fg]]) => ({ type: "expression", formulae: [`${col}5="${v}"`], style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: argb(bg) } }, font: { bold: true, color: { argb: argb(fg) } } } })),
+          });
+        cfSit(PC.sit, [
+          ["EM ABERTO", XC.falha],
+          ["CONCLUÍDA", XC.ok],
+        ]);
+        cfSit(PC.noPrazo, [
+          ["ATRASADA", XC.falha],
+          ["NO PRAZO", XC.ok],
+        ]);
         PD.addConditionalFormatting({
-          ref: `A5:A${5 + Math.max(ord.length, 1)}`,
-          rules: [
-            { type: "expression", formulae: ['A5="EM ABERTO"'], style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: argb(XC.falha[0]) } }, font: { bold: true, color: { argb: argb(XC.falha[1]) } } } },
-            { type: "expression", formulae: ['A5="CONCLUÍDA"'], style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: argb(XC.ok[0]) } }, font: { bold: true, color: { argb: argb(XC.ok[1]) } } } },
-          ],
+          ref: `${PC.dias}5:${PC.dias}${fimP}`,
+          rules: [{ type: "expression", formulae: [`AND(${PC.sit}5="EM ABERTO",ISNUMBER(${PC.dias}5),${PC.dias}5>30)`], style: { font: { bold: true, color: { argb: "FFC00000" } } } }],
         });
-        if (!ord.length) PD.getCell(5, 1).value = "Nenhuma pendência registrada no diário para este cliente.";
-        PD.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + Math.max(ord.length, 1), column: pc.length } };
+        lista(PD, `${PC.sit}5:${PC.sit}2000`, ["EM ABERTO", "CONCLUÍDA"]);
+        lista(PD, `${PC.prio}5:${PC.prio}2000`, ["ALTA", "MÉDIA", "BAIXA"]);
+        // tabela de prazos por prioridade (editável)
+        PD.mergeCells("V3:W3");
+        PD.getCell("V3").value = "PRAZO POR PRIORIDADE";
+        PD.getCell("V3").font = xFont({ bold: true, color: "FFFFFF" });
+        PD.getCell("V3").alignment = { horizontal: "center", vertical: "middle" };
+        PD.getCell("V3").fill = xFill(XC.cfg);
+        PD.getCell("W3").fill = xFill(XC.cfg);
+        cab(PD, 4, 22, "Prioridade");
+        cab(PD, 4, 23, "Dias");
+        SLA_PAD.forEach(([pr, d_], k) => {
+          const a_ = PD.getCell(5 + k, 22),
+            b_ = PD.getCell(5 + k, 23);
+          a_.value = pr;
+          b_.value = d_;
+          a_.font = xFont({ bold: true });
+          b_.fill = xFill(XC.amarelo);
+          a_.border = b_.border = xBorda;
+          b_.alignment = { horizontal: "center" };
+        });
+        PD.getCell(9, 22).value = "Mude os dias em amarelo:";
+        PD.getCell(10, 22).value = "os prazos se recalculam.";
+        PD.getCell(11, 22).value = "O diário ainda não tem prioridade;";
+        PD.getCell(12, 22).value = "todas entram como MÉDIA.";
+        [9, 10, 11, 12].forEach((l) => (PD.getCell(l, 22).font = xFont({ size: 8, italic: true, color: "7F7F7F" })));
+        PD.getColumn(21).width = 3;
+        PD.getColumn(22).width = 16;
+        PD.getColumn(23).width = 8;
+        if (!calcP.length) PD.getCell(5, 8).value = "Nenhuma pendência registrada no diário para este cliente.";
+        PD.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + calcP.length), column: pc.length } };
+        PD.pageSetup.printTitlesRow = "4:4";
 
         /* ---------- Pavimentos (pavimento × sistema) ---------- */
         const PV = nova("Pavimentos", { frz: 7 });
@@ -3326,6 +3476,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           ].map(([v, [bg, fg]]) => ({ type: "expression", formulae: [`A4="${v}"`], style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: argb(bg) } }, font: { bold: true, color: { argb: argb(fg) } } } })),
         });
         AL.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3 + Math.max(al.length, 1), column: ac2.length } };
+        lista(AL, "A4:A2000", ["PENDENTE", "OK", "NOK"]);
 
         /* ---------- Catálogo (ligações) e Legenda ---------- */
         const CT = nova("Catálogo", { frz: 3 });
