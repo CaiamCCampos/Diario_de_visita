@@ -1055,6 +1055,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         "SENHA 2": "senha2",
         "TIPO NO CATÁLOGO": "tipoCatNome",
         "TIPO NO CATALOGO": "tipoCatNome",
+        CAPACIDADE: "capacidade",
+        "UNIDADE DA CAPACIDADE": "capUnid",
+        "UNID. CAPACIDADE": "capUnid",
+        "EM USO": "emUso",
+        LIVRES: "-",
         // calculadas pelo sistema: ignoradas na leitura
         "PENDÊNCIAS EM ABERTO": "-",
         "SENHA CONFIRMADA EM": "-",
@@ -1097,6 +1102,62 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       const quadroDoItem = (inv, it) => (it && it.quadro ? quadrosDe(inv).find((q) => nomeQ(q.it.tag) === nomeQ(it.quadro)) : null);
       const ligadosAo = (inv, q) => Object.entries(inv).flatMap(([sis, d]) => ((d && d.itens) || []).filter((it) => it.quadro && nomeQ(it.quadro) === nomeQ(q.tag) && it.id !== q.id).map((it) => ({ sis, it })));
       const SEM_REDE = ["OFFLINE", "FALHA"];
+      /* ---- capacidade: qualquer dispositivo pode ter (NVR = canais, switch = portas, central = endereços/zonas, controladora = saídas…).
+         Vazio = dispositivo unitário (ex.: câmera) e não entra nas contas. O uso é contado sozinho quando dá:
+         NVR → câmeras com aquele NVR; quadro/switch → dispositivos ligados a ele; central SDAI única → dispositivos do SDAI.
+         Nos outros, o "em uso" é preenchido à mão. ---- */
+      const CAP_UNID = ["canais", "portas", "endereços", "zonas", "saídas", "leitoras", "laços", "entradas", "pontos"];
+      const ehNvr = (it) => /\b(NVR|DVR)\b/.test(semAcento(it && it.tipo).toUpperCase()) || /^(NVR|DVR)\b/.test(semAcento(it && it.tag).toUpperCase());
+      const nvrKey = (x) => {
+        const m = nomeQ(x).match(/^(?:NVR|DVR)?\s*0*(\d+)$/);
+        return m ? "N" + m[1] : nomeQ(x);
+      };
+      const ehCentral = (it) => /CENTRAL|PAINEL|REPETIDORA/.test(semAcento(it && it.tipo).toUpperCase());
+      function sugereUnid(sis, it) {
+        const t = semAcento(it.tipo).toUpperCase();
+        if (ehNvr(it)) return "canais";
+        if (/SWITCH|QUADRO/.test(t)) return "portas";
+        if (ehCentral(it)) return sis === "SDAI" ? "endereços" : "zonas";
+        if (/CONTROLADORA/.test(t)) return "saídas";
+        if (/AMPLIFICADOR/.test(t)) return "zonas";
+        return "";
+      }
+      // uso calculado a partir das ligações já cadastradas (ou null quando só dá para preencher à mão)
+      function usoAuto(inv, sis, it) {
+        // canal vazio (status VAZIO) não ocupa
+        const L = ((inv[sis] && inv[sis].itens) || []).filter((x) => x.id !== it.id && x.status !== "VAZIO");
+        if (ehNvr(it)) {
+          const lig = L.filter((x) => x.nvr && !ehNvr(x) && nvrKey(x.nvr) === nvrKey(it.tag));
+          return lig.length ? { n: lig.length, lig, como: "câmeras com este NVR" } : null;
+        }
+        if (ehQuadro(it)) {
+          const lig = ligadosAo(inv, it).map((x) => x.it).filter((x) => x.status !== "VAZIO");
+          return lig.length ? { n: lig.length, lig, como: "dispositivos ligados a este quadro" } : null;
+        }
+        if (sis === "SDAI" && ehCentral(it) && !/REPETIDORA/.test(semAcento(it.tipo).toUpperCase())) {
+          const centrais = L.filter((x) => ehCentral(x) && !/REPETIDORA/.test(semAcento(x.tipo).toUpperCase()) && x.tag !== it.tag);
+          if (centrais.length) return null; // mais de uma central: não dá para saber de qual é cada dispositivo
+          const lig = L.filter((x) => !ehCentral(x));
+          if (!lig.length) return null;
+          const porLaco = {};
+          lig.forEach((x) => x.laco && (porLaco[x.laco] = (porLaco[x.laco] || 0) + 1));
+          return { n: lig.length, lig, como: "dispositivos do SDAI", porLaco };
+        }
+        return null;
+      }
+      function capInfo(inv, sis, it) {
+        const cap = +it.capacidade || 0;
+        const au = usoAuto(inv, sis, it);
+        const uso = au ? au.n : it.emUso !== undefined && it.emUso !== "" ? +it.emUso || 0 : null;
+        if (!cap && !au) return null;
+        const pc = cap && uso !== null ? Math.round((uso / cap) * 100) : null;
+        return { cap, unid: it.capUnid || sugereUnid(sis, it), uso, auto: !!au, au, livres: cap && uso !== null ? cap - uso : null, pct: pc, nivel: pc === null ? "" : pc > 100 ? "acima" : pc >= 90 ? "cheio" : pc >= 75 ? "alto" : "ok" };
+      }
+      const barraCap = (c) =>
+        !c || c.pct === null
+          ? ""
+          : `<div style="background:#eee;border-radius:6px;height:8px;overflow:hidden;min-width:80px"><div style="height:8px;width:${Math.min(c.pct, 100)}%;background:${c.nivel === "acima" || c.nivel === "cheio" ? "#C00000" : c.nivel === "alto" ? "#E0A100" : "#2E7D32"}"></div></div>`;
+      const txtCap = (c) => (!c ? "" : c.cap ? `${c.uso === null ? "?" : c.uso} de ${c.cap} ${c.unid}${c.pct !== null ? ` (${c.pct}%)` : ""}${c.livres !== null ? ` · ${c.livres >= 0 ? c.livres + " livre(s)" : Math.abs(c.livres) + " acima da capacidade"}` : ""}` : `${c.uso} em uso · capacidade não informada`);
       const rotSis = (sis, k) => (sis === "SAI" ? { login: "Login master", senha: "Senha master", login2: "Login remoto", senha2: "Senha remota" }[k] : "") || ROT[k];
       const temAcesso2 = (sis) => sis === "SAI";
 
@@ -1263,11 +1324,15 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               mapa[c] = ch || "extra:" + hdr[c];
             }
             const nvr = /^(NVR|DVR)\s*\d*/i.test(tit) ? tit.toUpperCase().replace(/^(NVR|DVR)\s*(\d+)$/, "$1 $2") : "";
+            // canais do quadro (inclusive os vazios) = capacidade do NVR
+            const cCanal = g.find((c) => hdr[c] === "CANAL");
+            let maxCanal = 0;
+            if (cCanal) for (let r = hr + 1; r <= maxR; r++) if (/^\d+$/.test(cel(r, cCanal))) maxCanal = Math.max(maxCanal, +cel(r, cCanal));
             const n0 = (sistemas[sistema] || []).length;
             lerLinhas(nomeAba, sistema, cel, hr, maxR, mapa, nvr ? { nvr } : tit ? { obs: tit } : {});
             // o próprio NVR vira dispositivo (sem IP: completar depois)
             if (nvr && (sistemas[sistema] || []).length > n0 && !(sistemas[sistema] || []).some((x) => x.tag === nvr && x.tipo === "NVR"))
-              sistemas[sistema].splice(sistemas[sistema].filter((x) => x.tipo === "NVR" && /título do quadro/.test(x.origem)).length, 0, { tipo: "NVR", modelo: "", fabricante: "", tag: nvr, ip: "", pav: "", status: "", obs: "", origem: `${nomeAba} (título do quadro)`, login: "", senha: "", login2: "", senha2: "" });
+              sistemas[sistema].splice(sistemas[sistema].filter((x) => x.tipo === "NVR" && /título do quadro/.test(x.origem)).length, 0, { tipo: "NVR", modelo: "", fabricante: "", tag: nvr, ip: "", pav: "", status: "", obs: "", origem: `${nomeAba} (título do quadro)`, login: "", senha: "", login2: "", senha2: "", ...(maxCanal ? { capacidade: maxCanal, capUnid: "canais" } : {}) });
           }
         }
         // lê as linhas de uma tabela (mapa: coluna → campo); "fixo" completa campos que vêm do quadro (ex.: nvr)
@@ -1304,7 +1369,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               equiv[k] = (equiv[k] || 0) + 1;
             }
             it.status = normSt(reg.status);
-            for (const k of ["nvr", "canal", "laco", "firmware"]) if (reg[k]) it[k] = reg[k];
+            for (const k of ["nvr", "canal", "laco", "firmware", "capUnid"]) if (reg[k]) it[k] = reg[k];
+            for (const k of ["capacidade", "emUso"]) if (reg[k] && /^\d+$/.test(String(reg[k]).trim())) it[k] = +String(reg[k]).trim();
             for (const k of ACESSO) it[k] = reg[k] || "";
             it.obs = [reg.obs, fixo.obs, ...extras].filter(Boolean).join("; ");
             if (reg.quadro) it.quadro = reg.quadro;
@@ -1354,6 +1420,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           else if (K === "IP" && ipValido(v) && !it.ip) it.ip = v;
           else if (K === "STATUS") it.status = normSt(v);
           else if (K === "COMPUTER NAME") it.tag = v;
+          else if (/^QUANTITATIVO MAX|^CAPACIDADE$|^CANAIS$/.test(K.replace(/\.$/, "")) && /^\d+$/.test(String(v).trim())) {
+            it.capacidade = +String(v).trim();
+            it.capUnid = /^NVR\b/.test(nome) ? "canais" : "";
+            it.detalhes.push([k, v]);
+          } else if (/^QUANTITATIVO$/.test(K) && /^\d+$/.test(String(v).trim())) {
+            it.emUso = +String(v).trim();
+            it.detalhes.push([k, v]);
+          }
           else if (K === "LOGIN" && !it.login) it.login = v;
           else if (K === "SENHA" && !it.senha) it.senha = v;
           else if (RE_SENHA.test(k)) it.outros.push([k, v]);
@@ -1365,7 +1439,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       // junta o que veio da planilha com o inventário que já existe: mantém o ID, a confirmação de acesso e a observação
       const chaveItem = (sis, it) => [sis, it.tag, it.ip, it.nvr, it.canal, it.laco].map((x) => String(x || "").toUpperCase()).join("|");
       // campos que só existem no sistema (não vêm da planilha antiga): continuam no dispositivo ao reimportar
-      const CAMPOS_SISTEMA = ["tipoCat", "perfil", "atv", "quadro", "statusOrigem", "alteradoEm", "alteradoPor"];
+      const CAMPOS_SISTEMA = ["tipoCat", "perfil", "atv", "quadro", "statusOrigem", "alteradoEm", "alteradoPor", "capacidade", "capUnid", "emUso"];
       const credsDe = (aces, id) => {
         const a = ((aces && aces.acessos) || {})[id] || {};
         const o = {};
@@ -1476,6 +1550,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             L.push({ chave: `Tipo sem catálogo|${k}`, tipo: "Tipo sem catálogo", sis, ids, tag: tp, texto: `${plural(ids.length)} do tipo "${tp}" sem tipo do catálogo associado. Na aba Catálogo, associe a um tipo existente ou clique em Criar no catálogo.` });
           }
         }
+        for (const sis of Object.keys(inv))
+          for (const it of inv[sis].itens || []) {
+            const c = it.capacidade ? capInfo(inv, sis, it) : null;
+            if (!c || c.pct === null) continue;
+            if (c.nivel === "acima") L.push({ chave: `Acima da capacidade|${it.id}`, tipo: "Acima da capacidade", sis, ids: [it.id], tag: it.tag, texto: txtCap(c) });
+            else if (c.nivel === "cheio") L.push({ chave: `Capacidade quase no limite|${it.id}`, tipo: "Capacidade quase no limite", sis, ids: [it.id], tag: it.tag, texto: txtCap(c) });
+          }
         const vistosImp = new Set();
         for (const a of (meta && meta.importAlertas) || []) if (!vistosImp.has(a.chave)) vistosImp.add(a.chave) && L.push({ ids: [], tag: "", ...a });
         const dec = (meta && meta.decisoes) || {};
@@ -1726,7 +1807,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       /* abre um cliente: escuta os documentos do inventário dele */
       function abreCliente(id) {
         parar(unsubCli);
-        Object.assign(S, { cliId: id, view: "cliente", aba: "", inv: {}, aces: {}, meta: null, aberto: "", fBusca: "", fPav: "", fSt: "", fAl: false, fSp: false, lim: 200, vistas: {}, selSen: {}, grAb: {}, catEd: { mapa: {}, selecao: {}, pp: {} } });
+        Object.assign(S, { cliId: id, view: "cliente", aba: "", inv: {}, aces: {}, meta: null, aberto: "", fBusca: "", fPav: "", fSt: "", fAl: false, fSp: false, lim: 200, vistas: {}, selSen: {}, grAb: {}, catEd: { mapa: {}, selecao: {}, pp: {} }, capEd: {}, fCap: "", capTodos: false });
         const cli = S.clientes.find((c) => c.id === id);
         const f = ehAdmin() ? { clienteId: id } : { clienteId: id, equipeId: S.me.equipeId };
         unsubCli.push(
@@ -1736,7 +1817,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               (d.itens || []).forEach((it) => it.status && (it.status = normSt(it.status)));
               S.inv[d.sistema] = d;
             });
-            if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas", "catalogo", "pendencias"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
+            if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas", "catalogo", "pendencias", "capacidade"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
             render();
           }),
           DB.listen("inventarioAcessos", f, null, (a) => {
@@ -1867,9 +1948,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           disp = base ? Math.round((ok / base) * 1000) / 10 : 0;
         const nPendAb = (S.pend || []).filter((p) => p.aberta).length;
         const nSemCat = al.filter((a) => a.tipo === "Tipo sem catálogo" && alertaAtivo(a)).length;
+        const nCapCheio = al.filter((a) => (a.tipo === "Acima da capacidade" || a.tipo === "Capacidade quase no limite") && alertaAtivo(a)).length;
         const abas = [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))];
-        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
-        const corpo = S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
+        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "capacidade" ? "on" : ""}" data-aba="capacidade">Capacidade${nCapCheio ? ` <span class="chip red">${nCapCheio}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
+        const corpo = S.aba === "capacidade" ? vCapacidade() : S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
         return `<div class="card cinl"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3>${esc(cli.unidade)}</h3><div class="cacts">${cli.mp ? `<span class="chip">${esc(cli.mp)}</span>` : ""}<span class="chip">v${(m && m.versao) || 1}</span>
   ${pode("inv.novo") ? `<button class="b s" data-a="novoItem" data-sis="${esc(S.inv[S.aba] ? S.aba : "")}">+ Adicionar dispositivo</button>` : ""}${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
   <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
@@ -1977,13 +2059,32 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           .join("");
         return `<div class="sm"><b>${esc(it.id)}</b>${leg[sis + "|" + it.tipo] ? " · " + esc(leg[sis + "|" + it.tipo]) : ""}${it.origem ? " · veio de " + esc(it.origem) : ""}</div>
   <div class="g">${camposSis(sis).map(campo).join("")}</div>
-  ${vItemQuadro(sis, it, ed)}
+  ${vItemQuadro(sis, it, ed)}${vItemCap(sis, it, ed)}
   <div class="g">${acessos}</div>${vItemCat(sis, it)}${vItemDetalhes(sis, it)}${vItemPend(it)}
   <label>Observação</label><textarea id="e_obs" rows="2"${ed ? "" : " readonly"}>${esc(it.obs || "")}</textarea>
   ${it.statusOrigem ? `<div class="sm" style="margin-top:6px">Situação <b>${esc(it.statusOrigem.depois || it.status)}</b> marcada pelo diário em ${esc(it.statusOrigem.em || "")}${it.statusOrigem.por ? " por " + esc(it.statusOrigem.por) : ""}${it.statusOrigem.antes ? " (antes: " + esc(it.statusOrigem.antes) + ")" : ""}${it.statusOrigem.titulo ? " · pendência: " + esc(it.statusOrigem.titulo) : ""}</div>` : ""}
   <div class="sm" style="margin-top:6px">${it.verificado ? `<span class="ver">Senha confirmada em <b>${dh(it.verificado)}</b>${it.verificadoPor ? " por " + esc(it.verificadoPor) : ""}</span>` : temSenha(credDe(sis, it, S.aces)) ? '<span class="st FALHA">Senha a confirmar</span>' : "Sem login/senha cadastrados."}${it.alteradoEm ? ` · última alteração em ${esc(it.alteradoEm)}${it.alteradoPor ? " por " + esc(it.alteradoPor) : ""}` : ""}</div>
   <div>${ed || edA ? `<button class="b" data-a="salvaItem">Salvar alterações</button>` : ""}${pode("inv.confirmar") ? `<button class="b o" data-a="confirma">Senha OK (confirmar agora)</button>` : ""}${pode("inv.excluir") ? `<button class="b o" data-a="excluiItem">Excluir dispositivo</button>` : ""}<button class="b o" data-a="fechaItem">Fechar</button></div>`;
       }
+      function vItemCap(sis, it, ed) {
+        const c = capInfo(S.inv, sis, it);
+        const au = c && c.au;
+        const ro = ed ? "" : " readonly";
+        const lig = au && au.lig.length
+          ? `<details style="margin-top:6px"><summary class="sm">${au.n} ${esc(au.como)}${au.porLaco && Object.keys(au.porLaco).length ? " · por laço: " + Object.entries(au.porLaco).sort((a, b) => cmpNum(a[0], b[0])).map(([l, n]) => `L${esc(l)}: ${n}`).join(", ") : ""}</summary><div class="ids sm">${au.lig
+              .slice()
+              .sort((a, b) => cmpNum(a.canal, b.canal))
+              .map((x) => `<a data-a="vaiItem" data-id="${esc(x.id)}">${x.canal ? "C" + esc(x.canal) + " " : ""}${esc(x.tag || x.id)}${SEM_REDE.includes(x.status) ? " ⚠" : ""}</a>`)
+              .join("")}</div></details>`
+          : "";
+        return `<div class="cent"><b class="rd">Capacidade</b><div class="sm" style="margin:2px 0 6px">Deixe em branco para dispositivo unitário (ex.: câmera).</div>
+  <div class="g"><div><label>Capacidade</label><input id="e_capacidade" type="number" min="0" value="${esc(it.capacidade ?? "")}"${ro} placeholder="ex.: 32"></div>
+  <div><label>Unidade</label><input id="e_capUnid" list="dlCapUnid" value="${esc(it.capUnid || "")}"${ro} placeholder="${esc(sugereUnid(sis, it) || "ex.: canais, portas, saídas")}"></div>
+  <div><label>Em uso${au ? " (contado pelo sistema)" : ""}</label><input id="e_emUso" type="number" min="0" value="${esc(au ? au.n : it.emUso ?? "")}"${au ? " readonly" : ro}${au ? ' title="Contado a partir dos dispositivos ligados"' : ""}></div></div>
+  ${c && c.cap ? `<div class="sm" style="margin:6px 0 4px"><b>${esc(txtCap(c))}</b></div>${barraCap(c)}` : c ? `<div class="sm" style="margin-top:6px">${esc(txtCap(c))}</div>` : ""}${lig}
+  <datalist id="dlCapUnid">${CAP_UNID.map((u) => `<option value="${u}">`).join("")}</datalist></div>`;
+      }
+      const cmpNum = (a, b) => (+a || 0) - (+b || 0) || String(a || "").localeCompare(String(b || ""));
       function opcoesQuadro(atual, menosId) {
         const qs = quadrosDe(S.inv).filter((q) => q.it.id !== menosId);
         const tem = !atual || qs.some((q) => nomeQ(q.it.tag) === nomeQ(atual));
@@ -2184,6 +2285,40 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   ${lista.map(card).join("") || '<div class="card"><p class="sm">Nenhuma pendência.</p></div>'}`;
       }
 
+      /* ---- aba Capacidade: NVRs, centrais, switches, controladoras… com capacidade, uso e espaço livre ---- */
+      const RE_CAP = /NVR|DVR|CENTRAL|PAINEL|CONTROLADORA|SWITCH|QUADRO|SERVIDOR|GERENCIADORA|AMPLIFICADOR|MODULO|REPETIDORA|FONTE|RACK/;
+      function vCapacidade() {
+        const ed = pode("inv.editar");
+        const todos = [];
+        for (const sis of [...SISTEMAS.filter((x) => S.inv[x]), ...Object.keys(S.inv).filter((x) => !SISTEMAS.includes(x))])
+          for (const it of S.inv[sis].itens || []) todos.push({ sis, it, c: capInfo(S.inv, sis, it), cand: !!it.capacidade || RE_CAP.test(semAcento(it.tipo).toUpperCase()) || ehNvr(it) });
+        const b = semAcento(S.fCap || "").toLowerCase();
+        const L = todos.filter((x) => (S.capTodos || x.cand) && (!b || semAcento([x.sis, x.it.id, x.it.tag, x.it.tipo, x.it.modelo].join(" ")).toLowerCase().includes(b)));
+        const comCap = todos.filter((x) => x.c && x.c.cap);
+        const kp = (r, n, cl = "") => `<div class="kpi ${cl}"><div class="r">${r}</div><div class="n">${n}</div></div>`;
+        const tot = (u) => comCap.filter((x) => x.c.unid === u && x.c.uso !== null).reduce((a, x) => [a[0] + x.c.uso, a[1] + x.c.cap], [0, 0]);
+        const [cu, cc] = tot("canais");
+        const ed0 = S.capEd || {};
+        const vv = (sis, it, k) => {
+          const x = ed0[sis + "|" + it.id + "|" + k];
+          return x !== undefined ? x : it[k] ?? "";
+        };
+        const lin = L.map(({ sis, it, c }) => {
+          const k = esc(sis + "|" + it.id);
+          return `<tr><td>${esc(sis)}</td><td><a data-a="vaiItem" data-id="${esc(it.id)}">${esc(it.id)}</a></td><td><b>${esc(it.tag || "")}</b><div class="sm">${esc(it.tipo || "")}${it.modelo ? " · " + esc(it.modelo) : ""}</div></td>
+  <td><input data-cap="${k}" data-k="capacidade" type="number" min="0" value="${esc(vv(sis, it, "capacidade"))}" style="width:80px"${ed ? "" : " readonly"}></td>
+  <td><input data-cap="${k}" data-k="capUnid" list="dlCapUnid" value="${esc(vv(sis, it, "capUnid"))}" placeholder="${esc(sugereUnid(sis, it))}" style="width:110px"${ed ? "" : " readonly"}></td>
+  <td>${c && c.auto ? `<b>${c.uso}</b><div class="sm">contado</div>` : `<input data-cap="${k}" data-k="emUso" type="number" min="0" value="${esc(vv(sis, it, "emUso"))}" style="width:70px"${ed ? "" : " readonly"}>`}</td>
+  <td>${c && c.livres !== null ? (c.livres < 0 ? `<span class="rd">${c.livres}</span>` : c.livres) : "—"}</td>
+  <td style="min-width:110px">${c && c.pct !== null ? `<div class="sm">${c.pct}%</div>${barraCap(c)}` : "—"}</td></tr>`;
+        });
+        return `<div class="kpis">${kp("Com capacidade informada", comCap.length)}${kp("Acima de 90%", comCap.filter((x) => ["cheio", "acima"].includes(x.c.nivel)).length, "red")}${cc ? kp("Canais de NVR em uso", `${cu}<span class="sm"> de ${cc}</span>`) + kp("Canais livres", cc - cu, "ok") : ""}</div>
+  <div class="note" style="background:#f6f6f7">Capacidade de NVRs, centrais, switches, controladoras e o que mais precisar. Deixe em branco nos dispositivos unitários (câmeras, sensores). O <b>em uso</b> é contado sozinho no NVR (câmeras com aquele NVR), no switch/quadro (dispositivos ligados a ele) e na central do SDAI; nos outros, preencha à mão.</div>
+  <div class="filtros"><div><label>Buscar</label><input data-f="fCap" value="${esc(S.fCap || "")}" placeholder="TAG, tipo, modelo"></div><div><label class="k" style="margin:0 0 6px"><input type="checkbox" data-f="capTodos"${S.capTodos ? " checked" : ""}> Mostrar todos os dispositivos</label></div></div>
+  <div class="tblw"><table class="tbl"><thead><tr><th>Sistema</th><th>ID</th><th>Dispositivo</th><th>Capacidade</th><th>Unidade</th><th>Em uso</th><th>Livres</th><th>Ocupação</th></tr></thead><tbody>${lin.join("") || '<tr><td colspan="8" class="sm">Nenhum equipamento com capacidade. Marque "Mostrar todos os dispositivos" para incluir.</td></tr>'}</tbody></table></div>
+  <datalist id="dlCapUnid">${CAP_UNID.map((u) => `<option value="${u}">`).join("")}</datalist>
+  ${ed ? '<button class="b" data-a="salvaCap" style="width:100%;margin-top:10px">Salvar capacidades</button>' : ""}`;
+      }
       function vAlertas(al) {
         const edita = pode("inv.alertas");
         if (!al.length) return '<div class="card"><p class="sm">Nenhum alerta. Tudo certo com este inventário.</p></div>';
@@ -2489,6 +2624,19 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               if (el) n[k] = k === "pav" ? normPav(el.value)[0] : k === "status" ? normSt(el.value) : k === "fabricante" ? el.value.trim().toUpperCase() : el.value.trim();
             });
             n.obs = $("#e_obs").value.trim();
+            const ec = $("#e_capacidade"),
+              eu = $("#e_capUnid"),
+              ee = $("#e_emUso");
+            if (ec) {
+              if (ec.value !== "" && +ec.value >= 0) n.capacidade = +ec.value;
+              else delete n.capacidade;
+              if (eu && eu.value.trim()) n.capUnid = eu.value.trim();
+              else delete n.capUnid;
+              if (ee && !ee.readOnly) {
+                if (ee.value !== "" && +ee.value >= 0) n.emUso = +ee.value;
+                else delete n.emUso;
+              }
+            }
             const eq = $("#e_quadro");
             if (eq) {
               if (eq.value) n.quadro = eq.value;
@@ -2657,6 +2805,41 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         novoSis(el) {
           leNovo();
           S.novo.sis = el.value;
+          render();
+        },
+        async salvaCap() {
+          const mud = {};
+          Object.entries(S.capEd || {}).forEach(([chave, v0]) => {
+            const [sis, id, k] = chave.split("|");
+            const it = ((S.inv[sis] && S.inv[sis].itens) || []).find((x) => x.id === id);
+            if (!it) return;
+            const v = String(v0).trim();
+            const novo = k === "capUnid" ? v : v === "" ? undefined : +v;
+            if ((it[k] ?? "") === (novo ?? "")) return;
+            (mud[sis] = mud[sis] || []).push([id, k, novo]);
+          });
+          const sists = Object.keys(mud);
+          if (!sists.length) {
+            S.capEd = {};
+            return toast("Nada mudou");
+          }
+          let n = 0;
+          for (const sis of sists) {
+            const doc = clone(S.inv[sis]);
+            for (const [id, k, v] of mud[sis]) {
+              const it = doc.itens.find((x) => x.id === id);
+              if (v === undefined || v === "") delete it[k];
+              else it[k] = v;
+              it.alteradoEm = agora();
+              it.alteradoPor = meuNome();
+              n++;
+            }
+            S.inv[sis] = doc;
+            await salvaSistema(sis);
+          }
+          S.capEd = {};
+          audita("alterou capacidades", "inventario", S.cliId, `${cliNome(S.cliId)} · ${n} campo(s)`);
+          toast(`Capacidades salvas (${n} campo${n === 1 ? "" : "s"})`);
           render();
         },
         async novoSalva() {
@@ -2997,8 +3180,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           (S.catEd.novoPf = S.catEd.novoPf || {})[ev.target.dataset.novopf] = ev.target.value;
           return;
         }
+        if (ev.target.dataset && ev.target.dataset.cap) {
+          (S.capEd = S.capEd || {})[ev.target.dataset.cap + "|" + ev.target.dataset.k] = ev.target.value;
+          return;
+        }
         const f = ev.target.dataset && ev.target.dataset.f;
-        if (f === "busca" || f === "fBusca") {
+        if (f === "busca" || f === "fBusca" || f === "fCap") {
           S[f] = ev.target.value;
           S.lim = 200;
           clearTimeout(tBusca);
@@ -3020,6 +3207,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (t.id === "impArq" && t.files && t.files[0]) return leArquivo(t.files[0]);
         if (t.id === "n_sis") return ACOES.novoSis(t);
         const f = t.dataset && t.dataset.f;
+        if (f === "capTodos") {
+          S.capTodos = t.checked;
+          return render();
+        }
         if (f === "fPend") {
           S.fPend = t.value;
           return render();
@@ -3332,6 +3523,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           ...(EXTRAS[sis] || []).map((k) => [k, ROT[k], 9]),
           ...(usaQuadro ? [["quadro", "Quadro", 18]] : []),
           ["status", "Status", 12],
+          ...(((S.inv[sis] && S.inv[sis].itens) || []).some((i) => i.capacidade || usoAuto(S.inv, sis, i)) ? [["capacidade", "Capacidade", 11], ["capUnid", "Unid. capacidade", 13], ["emUso", "Em uso", 9], ["livres", "Livres", 9]] : []),
           ["pend", "Pendências em aberto", 12],
           ["sconf", "Senha confirmada em", 17],
           ...(semSenhas ? [] : ["login", "senha", ...(temAcesso2(sis) ? ["login2", "senha2"] : [])].map((k) => [k, rotSis(sis, k), 14])),
@@ -3643,6 +3835,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               // conta na aba Pendências as pendências EM ABERTO que citam este ID (muda sozinho se a situação mudar)
               pend: { formula: `IF($A${lin}="","",COUNTIFS(${PR("disp")},"*"&$A${lin}&"*",${PR("sit")},"EM ABERTO"))`, result: (pendPorId.get(it.id) || []).filter((p) => p.aberta).length },
               sconf: it.verificado ? dh(it.verificado) : senhaPend(sis, it, S.aces) ? "A CONFIRMAR" : "",
+              ...((c) => (c ? { capUnid: c.cap ? c.unid : it.capUnid, emUso: c.uso === null ? "" : c.uso, livres: c.livres === null ? "" : c.livres } : {}))(capInfo(S.inv, sis, it)),
               login: a.login,
               senha: a.senha,
               login2: a.login2,

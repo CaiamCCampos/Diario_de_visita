@@ -9,7 +9,7 @@
      ACESSO_TOKEN  texto aleatório; o endereço do conector fica .../mcp/<ACESSO_TOKEN>
    ========================================================================== */
 
-const VERSAO = "1.0.0";
+const VERSAO = "1.1.0";
 const PROTOCOLO = "2025-06-18";
 const SEM_REDE = ["OFFLINE", "FALHA"];
 const OK = ["ONLINE", "OPERANDO"];
@@ -235,6 +235,49 @@ const FERRAMENTAS = [
       });
       const semQuadro = todos.filter((i) => !ehQuadro(i) && !i.quadro);
       return { cliente: cli.nome, quadros: Q, sem_rede: Q.filter((q) => SEM_REDE.includes(q.status)).map((q) => q.quadro), dispositivos_sem_quadro_informado: semQuadro.length, offline_sem_quadro_informado: semQuadro.filter((i) => i.status === "OFFLINE").length };
+    },
+  },
+  {
+    name: "capacidade",
+    description: "Capacidade dos equipamentos de um cliente (NVRs/DVRs em canais, switches/quadros em portas, centrais em endereços ou zonas, controladoras em saídas): capacidade, quanto está em uso, quanto está livre e a ocupação em %. Use para perguntas como 'quantos canais livres tem nos NVRs' ou 'algum equipamento está lotado'.",
+    inputSchema: { type: "object", properties: { cliente: { type: "string" }, sistema: { type: "string" } }, required: ["cliente"] },
+    async run(fs, a) {
+      const cli = await achaCliente(fs, a.cliente);
+      const docs = filtraSis(await inventario(fs, cli), a.sistema);
+      const todos = docs.flatMap((d) => d.itens.map((i) => ({ ...i, sistema: d.sistema })));
+      const nvrKey = (x) => {
+        const m = norm(x).match(/^(?:NVR|DVR)? ?0*(\d+)$/);
+        return m ? "N" + m[1] : norm(x);
+      };
+      const ehNvr = (i) => /\b(NVR|DVR)\b/.test(norm(i.tipo)) || /^(NVR|DVR)\b/.test(norm(i.tag));
+      const ehCentral = (i) => /CENTRAL|PAINEL|REPETIDORA/.test(norm(i.tipo));
+      const uso = (i) => {
+        const L = todos.filter((x) => x.sistema === i.sistema && x.id !== i.id && x.status !== "VAZIO");
+        if (ehNvr(i)) {
+          const n = L.filter((x) => x.nvr && !ehNvr(x) && nvrKey(x.nvr) === nvrKey(i.tag)).length;
+          return n ? { n, auto: true } : null;
+        }
+        if (ehQuadro(i)) {
+          const n = todos.filter((x) => x.quadro && norm(x.quadro) === norm(i.tag) && x.id !== i.id && x.status !== "VAZIO").length;
+          return n ? { n, auto: true } : null;
+        }
+        if (norm(i.sistema) === "SDAI" && ehCentral(i) && !/REPETIDORA/.test(norm(i.tipo)) && !L.some((x) => ehCentral(x) && !/REPETIDORA/.test(norm(x.tipo)))) {
+          const n = L.filter((x) => !ehCentral(x)).length;
+          return n ? { n, auto: true } : null;
+        }
+        return i.emUso !== undefined && i.emUso !== null && i.emUso !== "" ? { n: +i.emUso, auto: false } : null;
+      };
+      const L = todos
+        .map((i) => {
+          const cap = +i.capacidade || 0,
+            u = uso(i);
+          if (!cap && !(u && u.auto)) return null;
+          const unid = i.capUnid || (ehNvr(i) ? "canais" : ehQuadro(i) ? "portas" : ehCentral(i) ? (norm(i.sistema) === "SDAI" ? "enderecos" : "zonas") : "");
+          return { equipamento: i.tag || i.id, id: i.id, sistema: i.sistema, tipo: i.tipo, capacidade: cap || "não informada", unidade: unid, em_uso: u ? u.n : "não informado", uso_contado_pelo_sistema: !!(u && u.auto), livres: cap && u ? cap - u.n : null, ocupacao_pct: cap && u ? Math.round((u.n / cap) * 100) : null };
+        })
+        .filter(Boolean);
+      const nv = L.filter((x) => x.unidade === "canais" && typeof x.capacidade === "number" && x.livres !== null);
+      return { cliente: cli.nome, equipamentos: L, acima_de_90_pct: L.filter((x) => x.ocupacao_pct >= 90).map((x) => x.equipamento), canais_de_nvr: nv.length ? { capacidade: nv.reduce((a, x) => a + x.capacidade, 0), em_uso: nv.reduce((a, x) => a + x.em_uso, 0), livres: nv.reduce((a, x) => a + x.livres, 0) } : undefined };
     },
   },
   {
