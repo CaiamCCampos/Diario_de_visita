@@ -1038,6 +1038,26 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         "SENHA/ACESSO REMOTO": "senha2",
         "SENHA/REMOTO": "senha2",
         "VERSÃO DE FIRMWARE": "firmware",
+        // colunas da planilha que o próprio sistema exporta (para atualizar e subir de novo)
+        ID: "id",
+        FIRMWARE: "firmware",
+        QUADRO: "quadro",
+        "QUADRO DE DISTRIBUIÇÃO": "quadro",
+        "QUADRO DE DISTRIBUICAO": "quadro",
+        "OBSERVAÇÃO": "obs",
+        OBSERVACAO: "obs",
+        OBS: "obs",
+        "LOGIN MASTER": "login",
+        "SENHA MASTER": "senha",
+        "LOGIN REMOTO": "login2",
+        "SENHA REMOTA": "senha2",
+        "LOGIN 2": "login2",
+        "SENHA 2": "senha2",
+        "TIPO NO CATÁLOGO": "tipoCatNome",
+        "TIPO NO CATALOGO": "tipoCatNome",
+        // calculadas pelo sistema: ignoradas na leitura
+        "PENDÊNCIAS EM ABERTO": "-",
+        "SENHA CONFIRMADA EM": "-",
       };
       const STATUS = ["ONLINE", "OPERANDO", "FALHA", "OFFLINE", "VAZIO"];
       // "VERIFICAR" deixou de existir: virou FALHA (planilhas antigas e dados já gravados)
@@ -1061,6 +1081,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         canal: "Canal",
         laco: "Laço",
         firmware: "Firmware",
+        quadro: "Quadro",
         status: "Status",
         login: "Login",
         senha: "Senha",
@@ -1068,6 +1089,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         senha2: "Senha 2",
         obs: "Observação",
       };
+      /* ---- quadros de distribuição (infraestrutura de rede): são dispositivos do tipo QUADRO…;
+         cada dispositivo pode dizer de qual quadro recebe rede (campo quadro = TAG do quadro) ---- */
+      const ehQuadro = (it) => /QUADRO/i.test(semAcento(it && it.tipo));
+      const nomeQ = (x) => semAcento(x || "").toUpperCase().trim();
+      const quadrosDe = (inv) => Object.entries(inv).flatMap(([sis, d]) => ((d && d.itens) || []).filter(ehQuadro).map((it) => ({ sis, it })));
+      const quadroDoItem = (inv, it) => (it && it.quadro ? quadrosDe(inv).find((q) => nomeQ(q.it.tag) === nomeQ(it.quadro)) : null);
+      const ligadosAo = (inv, q) => Object.entries(inv).flatMap(([sis, d]) => ((d && d.itens) || []).filter((it) => it.quadro && nomeQ(it.quadro) === nomeQ(q.tag) && it.id !== q.id).map((it) => ({ sis, it })));
+      const SEM_REDE = ["OFFLINE", "FALHA"];
       const rotSis = (sis, k) => (sis === "SAI" ? { login: "Login master", senha: "Senha master", login2: "Login remoto", senha2: "Senha remota" }[k] : "") || ROT[k];
       const temAcesso2 = (sis) => sis === "SAI";
 
@@ -1248,6 +1277,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             const reg = {},
               extras = [];
             for (const [c, ch] of Object.entries(mapa)) {
+              if (ch === "-") continue;
               const v = cel(r, +c);
               if (ch.startsWith("extra:")) {
                 if (v) extras.push(`${ch.slice(6)}: ${v}`);
@@ -1257,6 +1287,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             // só o número do canal preenchido = canal vazio no NVR
             if (!["tipo", "modelo", "tag", "ip", "status"].some((k) => reg[k]) && !extras.length) continue;
             if (fixo.nvr && !reg.nvr) reg.nvr = fixo.nvr;
+            // planilha exportada pelo sistema: o tipo vem com a legenda entre parênteses
+            if ("tipoCatNome" in reg && reg.tipo) reg.tipo = reg.tipo.replace(/\s*\([^)]*\)\s*$/, "");
             const it = { tipo: reg.tipo || "", modelo: reg.modelo || "", fabricante: (reg.fabricante || "").toUpperCase(), tag: reg.tag || "", ip: reg.ip || "" };
             if (!it.tipo) {
               if (sistema === "CFTV") {
@@ -1274,7 +1306,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             it.status = normSt(reg.status);
             for (const k of ["nvr", "canal", "laco", "firmware"]) if (reg[k]) it[k] = reg[k];
             for (const k of ACESSO) it[k] = reg[k] || "";
-            it.obs = [fixo.obs, ...extras].filter(Boolean).join("; ");
+            it.obs = [reg.obs, fixo.obs, ...extras].filter(Boolean).join("; ");
+            if (reg.quadro) it.quadro = reg.quadro;
+            if (reg.id) it.idPlanilha = reg.id;
+            if (reg.tipoCatNome && reg.tipoCatNome !== "—") {
+              const t = ((S.cat && S.cat.tipos) || []).find((x) => x.sis === sisCat(sistema) && semAcento(x.nome).toUpperCase().trim() === semAcento(reg.tipoCatNome).toUpperCase().trim());
+              if (t) it.tipoCatPlanilha = t.id;
+            }
             it.origem = `${nomeAba} L${r}`;
             itens.push(it);
           }
@@ -1326,23 +1364,49 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
 
       // junta o que veio da planilha com o inventário que já existe: mantém o ID, a confirmação de acesso e a observação
       const chaveItem = (sis, it) => [sis, it.tag, it.ip, it.nvr, it.canal, it.laco].map((x) => String(x || "").toUpperCase()).join("|");
-      function montaInventario(res, antigos, antAces = {}) {
+      // campos que só existem no sistema (não vêm da planilha antiga): continuam no dispositivo ao reimportar
+      const CAMPOS_SISTEMA = ["tipoCat", "perfil", "atv", "quadro", "statusOrigem", "alteradoEm", "alteradoPor"];
+      const credsDe = (aces, id) => {
+        const a = ((aces && aces.acessos) || {})[id] || {};
+        const o = {};
+        ACESSO.forEach((k) => (o[k] = a[k] || ""));
+        if (a.outros && a.outros.length) o.outros = a.outros;
+        return o;
+      };
+      // juntar = true: acrescenta os novos e atualiza os que já existem, sem apagar o que não está na planilha
+      function montaInventario(res, antigos, antAces = {}, juntar = false) {
         const out = {};
-        for (const [sis, itens] of Object.entries(res.sistemas)) {
+        const cont = { novos: 0, atualizados: 0, mantidos: 0 };
+        const sists = new Set([...Object.keys(res.sistemas), ...(juntar ? Object.keys(antigos) : [])]);
+        for (const sis of sists) {
+          const itens = res.sistemas[sis] || [];
           const ant = (antigos[sis] && antigos[sis].itens) || [];
-          const porChave = {};
-          ant.forEach((a) => ((porChave[chaveItem(sis, a)] = porChave[chaveItem(sis, a)] || []).push(a)));
+          const porChave = {},
+            porId = {};
+          ant.forEach((a) => {
+            (porChave[chaveItem(sis, a)] = porChave[chaveItem(sis, a)] || []).push(a);
+            porId[String(a.id).toUpperCase()] = a;
+          });
           const usados = new Set();
           let prox = ant.reduce((m, a) => Math.max(m, +String(a.id).split("-").pop() || 0), 0);
           const cod = CODIGO[sis] || sis;
           out[sis] = itens.map((it) => {
-            const cand = (porChave[chaveItem(sis, it)] || []).find((a) => !usados.has(a.id));
-            const n = { ...it };
+            const pid = it.idPlanilha && porId[String(it.idPlanilha).toUpperCase()];
+            const cand = (pid && !usados.has(pid.id) ? pid : null) || (porChave[chaveItem(sis, it)] || []).find((a) => !usados.has(a.id));
+            let n = { ...it };
             if (cand) {
               usados.add(cand.id);
+              if (juntar) {
+                // atualiza: o que veio preenchido na planilha passa por cima, o resto fica como estava
+                const novo = {};
+                Object.entries(it).forEach(([k, v]) => {
+                  if (v !== "" && v !== undefined && !(Array.isArray(v) && !v.length)) novo[k] = v;
+                });
+                n = { ...cand, ...credsDe(antAces[sis], cand.id), ...novo };
+              }
               n.id = cand.id;
               const credSis = credDe(sis, cand, antAces),
-                igual = JSON.stringify(credSis) === JSON.stringify(credDe(sis, it, null));
+                igual = JSON.stringify(credSis) === JSON.stringify(credDe(sis, n, null));
               if (cand.verificado) {
                 // senha já conferida em campo vale mais que a planilha: mantém a do sistema e avisa a diferença
                 Object.assign(n, credSis, { verificado: cand.verificado, verificadoPor: cand.verificadoPor || "" });
@@ -1350,10 +1414,26 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                   res.importAlertas.push({ chave: `Senha divergente|${cand.id}|${JSON.stringify(credDe(sis, it, null))}`, tipo: "Senha da planilha diferente da confirmada", sis, ids: [cand.id], tag: it.tag, texto: `Mantida a senha confirmada em ${dh(cand.verificado)}; a planilha traz outra` });
               }
               if (cand.obs && !n.obs) n.obs = cand.obs;
-            } else n.id = `${cod}-${String(++prox).padStart(4, "0")}`;
+              CAMPOS_SISTEMA.forEach((k) => {
+                if (cand[k] !== undefined && (n[k] === undefined || n[k] === "")) n[k] = cand[k];
+              });
+              cont.atualizados++;
+            } else {
+              n.id = `${cod}-${String(++prox).padStart(4, "0")}`;
+              cont.novos++;
+            }
+            if (n.tipoCatPlanilha) n.tipoCat = n.tipoCatPlanilha;
+            delete n.tipoCatPlanilha;
+            delete n.idPlanilha;
             return n;
           });
+          if (juntar)
+            ant.filter((a) => !usados.has(a.id)).forEach((a) => {
+              out[sis].push({ ...a, ...credsDe(antAces[sis], a.id) });
+              cont.mantidos++;
+            });
         }
+        res.contagem = cont;
         return out;
       }
 
@@ -1750,14 +1830,21 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const difNome = r.cliente && semAcento(cliSel).toUpperCase().replace(/[^A-Z0-9]/g, "").indexOf(semAcento(r.cliente).toUpperCase().replace(/^ED\.?\s*/, "").replace(/[^A-Z0-9]/g, "")) < 0;
           prev = `<div class="card"><h2>Prévia</h2>
   ${difNome ? `<div class="note">A planilha diz <b>${esc(r.cliente)}</b> e o cliente escolhido é <b>${esc(cliSel)}</b>. Confira se é o arquivo certo.</div>` : ""}
-  ${existe ? `<div class="note">Este cliente já tem inventário (versão v${existe.versao || 1}). Ao salvar, ele é substituído pela planilha, mas mantém os IDs dos dispositivos que continuam, as confirmações de acesso, as decisões dos alertas e a legenda.</div>` : ""}
+  ${
+    existe
+      ? `<div class="note">Este cliente já tem inventário (versão v${existe.versao || 1}). Como usar esta planilha?
+  <label class="k" style="margin-top:8px"><input type="radio" name="impModo" data-a="impModo" value="juntar"${I.modo === "juntar" ? " checked" : ""}> <span><b>Acrescentar e atualizar</b>: entram os dispositivos novos, os que já existem são atualizados com o que veio preenchido, e nada é apagado (planilha de obra, ampliação ou a planilha exportada daqui).</span></label>
+  <label class="k"><input type="radio" name="impModo" data-a="impModo" value="substituir"${I.modo === "substituir" ? " checked" : ""}> <span><b>Substituir</b>: o inventário fica igual à planilha; o que não estiver nela é apagado.</span></label>
+  <div class="sm" style="margin-top:6px">${r.contagem ? `${r.contagem.novos} novo(s) · ${r.contagem.atualizados} já existente(s) atualizado(s)${I.modo === "juntar" ? ` · ${r.contagem.mantidos} mantido(s) sem mudança` : ""}. ` : ""}Nos dois casos ficam os IDs, as senhas confirmadas, o tipo do catálogo, o quadro, as decisões dos alertas e a legenda.</div></div>`
+      : ""
+  }
   <div class="kpis">${Object.entries(r.inv)
     .map(([s, l]) => `<div class="kpi"><div class="r">${esc(s)}</div><div class="n">${l.length}</div></div>`)
     .join("")}<div class="kpi am"><div class="r">Alertas</div><div class="n">${al.filter(alertaAtivo).length}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${rs.senhasPend}</div></div></div>
   <p class="sm">Todo dispositivo com login/senha entra como <b>senha a confirmar</b>. Ele sai dessa lista quando alguém confere a senha no cliente e marca <b>Senha OK</b>.${existe ? " Os que já estavam confirmados continuam confirmados se a senha não mudou." : ""}</p>
   <details class="eq"><summary class="sp"><b>Alertas encontrados</b><span class="chip am">${al.length}</span></summary>${al.map((a) => `<div class="sm">· <b>${esc(a.tipo)}</b> (${esc(a.sis)}) ${esc(a.tag || "")} — ${esc(a.texto)}</div>`).join("") || '<p class="sm">Nenhum.</p>'}</details>
   <details class="eq"><summary class="sp"><b>Padronização aplicada</b><span class="chip">${r.equivalencias.length}</span></summary><div class="prev"><table><tr><th>Campo</th><th>Original</th><th>Padronizado</th><th>Qtd.</th></tr>${r.equivalencias.map((e) => `<tr><td>${esc(e[0])}</td><td>${esc(e[1])}</td><td>${esc(e[2])}</td><td>${e[3]}</td></tr>`).join("")}</table></div></details>
-  <button class="b" data-a="impSalva"${I.salvando ? " disabled" : ""} style="width:100%">${I.salvando ? "Salvando…" : existe ? "Substituir o inventário (vira v" + ((existe.versao || 1) + 1) + ")" : "Salvar inventário"}</button></div>`;
+  <button class="b" data-a="impSalva"${I.salvando ? " disabled" : ""} style="width:100%">${I.salvando ? "Salvando…" : existe ? (I.modo === "juntar" ? "Acrescentar ao inventário" : "Substituir o inventário") + " (vira v" + ((existe.versao || 1) + 1) + ")" : "Salvar inventário"}</button></div>`;
         }
         return `<div class="card"><h2>Importar planilha antiga de senhas</h2>
   <p class="sm">Escolha o cliente e anexe a planilha (.xlsx). O sistema lê as abas CFTV, SCA, SAI, SDAI, Automação e Sonorização, padroniza pavimento e status, separa servidores e NVRs e mostra os alertas antes de salvar.</p>
@@ -1771,7 +1858,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const cli = S.clientes.find((c) => c.id === S.cliId) || { unidade: S.meta ? S.meta.clienteNome : "Cliente" };
         const m = S.meta;
         if (!m && !Object.keys(S.inv).length)
-          return `<div class="card"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3 style="margin-top:10px">${esc(cli.unidade)}</h3><p class="sm">Este cliente ainda não tem inventário.</p>${pode("inv.importar") ? `<button class="b" data-a="impCli" data-id="${esc(S.cliId)}">Importar planilha</button>` : ""}</div>`;
+          return `<div class="card"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3 style="margin-top:10px">${esc(cli.unidade)}</h3><p class="sm">Este cliente ainda não tem inventário. Importe a planilha ou cadastre os dispositivos um a um.</p>${pode("inv.importar") ? `<button class="b" data-a="impCli" data-id="${esc(S.cliId)}">Importar planilha</button><button class="b o" data-a="novoItem" data-sis="CFTV">Cadastrar dispositivo</button>` : ""}</div>${S.novo ? vNovo() : ""}`;
         const al = calcAlertas(S.inv, m),
           alAt = al.filter(alertaAtivo).length;
         const r = resumo(S.inv, m, S.aces);
@@ -1784,10 +1871,29 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
         const corpo = S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
         return `<div class="card cinl"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3>${esc(cli.unidade)}</h3><div class="cacts">${cli.mp ? `<span class="chip">${esc(cli.mp)}</span>` : ""}<span class="chip">v${(m && m.versao) || 1}</span>
-  ${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
+  ${pode("inv.novo") ? `<button class="b s" data-a="novoItem" data-sis="${esc(S.inv[S.aba] ? S.aba : "")}">+ Adicionar dispositivo</button>` : ""}${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
   <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
   <div class="kpis"><div class="kpi"><div class="r">Dispositivos</div><div class="n">${r.total}</div></div><div class="kpi ok"><div class="r">Disponibilidade</div><div class="n">${String(disp).replace(".", ",")}%</div></div><div class="kpi am"><div class="r">Falha</div><div class="n">${r.status.FALHA || 0}</div></div><div class="kpi red"><div class="r">Offline</div><div class="n">${r.status.OFFLINE || 0}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${r.senhasPend}</div></div><div class="kpi ok"><div class="r">Senhas confirmadas</div><div class="n">${r.verificados}<span class="sm"> de ${r.comSenha}</span></div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${alAt}</div></div></div>
-  ${tabs}<div class="aux">${corpo}</div>`;
+  ${S.novo ? vNovo() : ""}${tabs}<div class="aux">${corpo}</div>`;
+      }
+      /* ---- cadastro de um dispositivo novo (obra, câmera a mais, quadro de distribuição…) ---- */
+      function vNovo() {
+        const N = S.novo,
+          sis = N.sis;
+        const tipos = [...new Set([...((S.inv[sis] && S.inv[sis].itens) || []).map((i) => i.tipo).filter(Boolean), "QUADRO DE DISTRIBUIÇÃO"])].sort();
+        const ext = sis ? (EXTRAS[sis] || []) : [];
+        const inp = (k, rot, o = {}) => `<div><label>${esc(rot)}</label><input id="n_${k}" value="${esc(N[k] || "")}"${o.list ? ` list="${o.list}"` : ""}${o.ph ? ` placeholder="${esc(o.ph)}"` : ""} autocomplete="off"></div>`;
+        return `<div class="card" style="border:2px solid var(--p)"><h2>Novo dispositivo</h2>
+  <div class="g"><div><label>Sistema</label><select id="n_sis"><option value="">— escolher —</option>${SISTEMAS.map((x) => `<option${x === sis ? " selected" : ""}>${x}</option>`).join("")}</select>${sis && !S.inv[sis] ? `<div class="sm">Este cliente ainda não tem ${esc(sis)}: o sistema será criado${pode("inv.importar") ? "" : " (só o administrador pode)"}.</div>` : ""}</div>
+  ${inp("tipo", "Tipo", { list: "dlNTipo", ph: "Ex.: CÂMERA, NVR, QUADRO DE DISTRIBUIÇÃO" })}<datalist id="dlNTipo">${tipos.map((t) => `<option value="${esc(t)}">`).join("")}</datalist></div>
+  <div class="g">${inp("tag", "TAG (nome)")}${inp("ip", "IP")}${inp("pav", "Pavimento", { list: "dlPav" })}
+  ${ext.filter((k) => k !== "firmware").map((k) => inp(k, ROT[k])).join("")}
+  <div><label>Quadro de distribuição</label><select id="n_quadro">${opcoesQuadro(N.quadro, "")}</select></div>
+  <div><label>Status</label><select id="n_status">${["", ...STATUS].map((x) => `<option${x === (N.status || "") ? " selected" : ""}>${x}</option>`).join("")}</select></div>
+  ${inp("modelo", "Modelo")}${inp("fabricante", "Fabricante")}</div>
+  ${pode("inv.acesso") ? `<div class="g">${inp("login", "Login")}${inp("senha", "Senha")}</div>` : ""}
+  <label>Observação</label><textarea id="n_obs" rows="2">${esc(N.obs || "")}</textarea>
+  <div><button class="b" data-a="novoSalva">Salvar dispositivo</button><button class="b o" data-a="novoFecha">Cancelar</button></div></div>`;
       }
 
       function camposSis(sis) {
@@ -1801,7 +1907,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const leg = (S.meta && S.meta.legenda) || {};
         let l = itens.filter(
           (it) =>
-            (!b || semAcento([it.id, it.tag, it.ip, it.tipo, it.modelo, it.pav, leg[sis + "|" + it.tipo]].join(" ")).toLowerCase().includes(b)) &&
+            (!b || semAcento([it.id, it.tag, it.ip, it.tipo, it.modelo, it.pav, it.quadro, it.nvr, leg[sis + "|" + it.tipo]].join(" ")).toLowerCase().includes(b)) &&
             (!S.fPav || it.pav === S.fPav) &&
             (!S.fSt || it.status === S.fSt) &&
             (!S.fAl || comAl.has(it.id)) &&
@@ -1809,7 +1915,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         );
         const pavs = [...new Set(itens.map((i) => i.pav).filter(Boolean))].sort(cmpPav);
         const ext = EXTRAS[sis] || [];
-        const cols = ["id", "tipo", "tag", "ip", "pav", ...ext.filter((k) => k !== "firmware"), "status"];
+        const usaQ = quadrosDe(S.inv).length > 0 || Object.values(S.inv).some((d) => (d.itens || []).some((i) => i.quadro));
+        const cols = ["id", "tipo", "tag", "ip", "pav", ...ext.filter((k) => k !== "firmware"), ...(usaQ ? ["quadro"] : []), "status"];
         const n = l.length;
         l = l.slice(0, S.lim);
         const linhas = l
@@ -1846,7 +1953,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   <div><label>Pavimento</label><select data-f="fPav"><option value="">Todos</option>${pavs.map((p) => `<option${p === S.fPav ? " selected" : ""}>${esc(p)}</option>`).join("")}</select></div>
   <div><label>Status</label><select data-f="fSt"><option value="">Todos</option>${STATUS.map((p) => `<option${p === S.fSt ? " selected" : ""}>${p}</option>`).join("")}</select></div>
   <div><label class="k" style="margin:0 0 4px"><input type="checkbox" data-f="fAl"${S.fAl ? " checked" : ""}> Só com alerta</label><label class="k" style="margin:0 0 6px"><input type="checkbox" data-f="fSp"${S.fSp ? " checked" : ""}> Só senha a confirmar</label></div></div>
-  <div class="top"><span class="sm">${n} de ${itens.length} ${n === 1 ? "dispositivo" : "dispositivos"}</span>${pode("inv.novo") ? `<button class="b s" data-a="novoItem" style="margin:0">+ Adicionar dispositivo</button>` : ""}</div>
+  <div class="top"><span class="sm">${n} de ${itens.length} ${n === 1 ? "dispositivo" : "dispositivos"}</span>${pode("inv.novo") ? `<button class="b s" data-a="novoItem" data-sis="${esc(sis)}" style="margin:0">+ Adicionar dispositivo</button>` : ""}</div>
   <div class="tblw"><table class="tbl"><thead><tr>${cols.map((k) => `<th>${esc(ROT[k])}</th>`).join("")}<th>Senha</th></tr></thead><tbody>${linhas || `<tr><td colspan="${cols.length + 1}" class="sm">Nada encontrado.</td></tr>`}</tbody></table></div>
   ${n > S.lim ? `<button class="b o mais" data-a="mais">Mostrar mais (${n - S.lim} restantes)</button>` : ""}`;
       }
@@ -1870,11 +1977,30 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           .join("");
         return `<div class="sm"><b>${esc(it.id)}</b>${leg[sis + "|" + it.tipo] ? " · " + esc(leg[sis + "|" + it.tipo]) : ""}${it.origem ? " · veio de " + esc(it.origem) : ""}</div>
   <div class="g">${camposSis(sis).map(campo).join("")}</div>
+  ${vItemQuadro(sis, it, ed)}
   <div class="g">${acessos}</div>${vItemCat(sis, it)}${vItemDetalhes(sis, it)}${vItemPend(it)}
   <label>Observação</label><textarea id="e_obs" rows="2"${ed ? "" : " readonly"}>${esc(it.obs || "")}</textarea>
   ${it.statusOrigem ? `<div class="sm" style="margin-top:6px">Situação <b>${esc(it.statusOrigem.depois || it.status)}</b> marcada pelo diário em ${esc(it.statusOrigem.em || "")}${it.statusOrigem.por ? " por " + esc(it.statusOrigem.por) : ""}${it.statusOrigem.antes ? " (antes: " + esc(it.statusOrigem.antes) + ")" : ""}${it.statusOrigem.titulo ? " · pendência: " + esc(it.statusOrigem.titulo) : ""}</div>` : ""}
   <div class="sm" style="margin-top:6px">${it.verificado ? `<span class="ver">Senha confirmada em <b>${dh(it.verificado)}</b>${it.verificadoPor ? " por " + esc(it.verificadoPor) : ""}</span>` : temSenha(credDe(sis, it, S.aces)) ? '<span class="st FALHA">Senha a confirmar</span>' : "Sem login/senha cadastrados."}${it.alteradoEm ? ` · última alteração em ${esc(it.alteradoEm)}${it.alteradoPor ? " por " + esc(it.alteradoPor) : ""}` : ""}</div>
   <div>${ed || edA ? `<button class="b" data-a="salvaItem">Salvar alterações</button>` : ""}${pode("inv.confirmar") ? `<button class="b o" data-a="confirma">Senha OK (confirmar agora)</button>` : ""}${pode("inv.excluir") ? `<button class="b o" data-a="excluiItem">Excluir dispositivo</button>` : ""}<button class="b o" data-a="fechaItem">Fechar</button></div>`;
+      }
+      function opcoesQuadro(atual, menosId) {
+        const qs = quadrosDe(S.inv).filter((q) => q.it.id !== menosId);
+        const tem = !atual || qs.some((q) => nomeQ(q.it.tag) === nomeQ(atual));
+        return `<option value="">— não sei / nenhum —</option>${qs.map((q) => `<option value="${esc(q.it.tag)}"${nomeQ(q.it.tag) === nomeQ(atual) ? " selected" : ""}>${esc(q.it.tag || q.it.id)}${SEM_REDE.includes(q.it.status) ? " (" + esc(q.it.status) + ")" : ""}</option>`).join("")}${tem ? "" : `<option value="${esc(atual)}" selected>${esc(atual)} (não cadastrado)</option>`}`;
+      }
+      function vItemQuadro(sis, it, ed) {
+        const qs = quadrosDe(S.inv);
+        const lig = ehQuadro(it) ? ligadosAo(S.inv, it) : [];
+        const sel = `<div class="g"><div><label>${ehQuadro(it) ? "Recebe rede do quadro" : "Quadro de distribuição (de onde vem a rede)"}</label><select id="e_quadro"${ed ? "" : " disabled"}>${opcoesQuadro(it.quadro, it.id)}</select>${
+          !qs.length ? '<div class="sm">Nenhum quadro cadastrado neste cliente. Cadastre com "+ Adicionar dispositivo", tipo QUADRO DE DISTRIBUIÇÃO.</div>' : ""
+        }</div></div>`;
+        const lista = lig.length
+          ? `<div class="cent"><b class="rd">Ligados a este quadro (${lig.length})</b><div class="sm" style="margin:4px 0">${lig.filter((x) => SEM_REDE.includes(x.it.status)).length} sem rede (OFFLINE/FALHA)</div><div class="ids sm">${lig.map((x) => `<a data-a="vaiItem" data-id="${esc(x.it.id)}">${esc(x.it.tag || x.it.id)}</a>`).join("")}</div></div>`
+          : ehQuadro(it)
+            ? '<div class="sm" style="margin:6px 0">Nenhum dispositivo ligado a este quadro ainda. Na ficha de cada câmera, escolha este quadro no campo "Quadro de distribuição".</div>'
+            : "";
+        return sel + lista;
       }
       function vItemCat(sis, it) {
         const ed = pode("inv.editar"),
@@ -2040,7 +2166,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           return `<div class="al ${p.aberta ? "NOK" : "OK"}" style="opacity:1"><div class="t"><b>${esc(p.titulo || "(sem título)")}</b><span class="chip ${p.aberta ? "red" : "ok"}">${p.aberta ? "Em aberto há " + dias(p.criada, hoje()) + " dia(s)" : "Concluída " + bd(p.concluidaEm)}</span></div>
   <div class="sm">${pendSis(p) ? `<b>${esc(pendSis(p))}</b>` : ""}${t ? " · " + esc(t.nome) : ""}${p.status ? " · " + esc(p.status) : ""} · aberta por ${esc(p.criadaPorNome || "(sem registro)")} em ${bd(p.criada)}${!p.aberta && p.concluidaEm ? ` · concluída em ${bd(p.concluidaEm)}${p.concluidaPorNome ? " por " + esc(p.concluidaPorNome) : ""}` : ""}</div>
   ${p.problema ? `<div class="sm" style="margin-top:4px">${esc(p.problema)}</div>` : ""}${!p.aberta && p.solucao ? `<div class="sm" style="margin-top:4px"><b>Solução:</b> ${esc(p.solucao)}</div>` : ""}
-  ${ids.length ? `<div class="ids sm">${p.dispId ? "Dispositivo" : "TAG citada"}: ${ids.map((id) => `<a data-a="vaiItem" data-id="${esc(id)}">${esc(id)}</a>`).join("")}${p.dispId && p.dispTag ? " " + esc(p.dispTag) : ""}${p.dispId && p.dispStatus ? ` · situação marcada: <span class="st ${esc(p.dispStatus)}">${esc(p.dispStatus)}</span>` : ""}</div>` : '<div class="sm" style="color:var(--d)">Sem dispositivo ligado. No diário, escolha o dispositivo na pendência (campo "Dispositivo do inventário").</div>'}</div>`;
+  ${ids.length ? `<div class="ids sm">${p.dispId ? "Dispositivo" : "TAG citada"}: ${ids.map((id) => `<a data-a="vaiItem" data-id="${esc(id)}">${esc(id)}</a>`).join("")}${p.dispId && p.dispTag ? " " + esc(p.dispTag) : ""}${p.dispId && p.dispStatus ? ` · situação marcada: <span class="st ${esc(p.dispStatus)}">${esc(p.dispStatus)}</span>` : ""}</div>${(() => {
+    const q = p.dispId && quadrosDe(S.inv).find((x) => x.it.id === p.dispId);
+    if (!q) return "";
+    const lig = ligadosAo(S.inv, q.it),
+      sr = lig.filter((x) => SEM_REDE.includes(x.it.status));
+    return `<div class="sm" style="margin-top:4px"><b>Quadro de distribuição:</b> ${lig.length} dispositivo(s) ligado(s), ${sr.length} sem rede${sr.length ? `<div class="ids">${sr.map((x) => `<a data-a="vaiItem" data-id="${esc(x.it.id)}">${esc(x.it.tag || x.it.id)}</a>`).join("")}</div>` : ""}</div>`;
+  })()}` : '<div class="sm" style="color:var(--d)">Sem dispositivo ligado. No diário, escolha o dispositivo na pendência (campo "Dispositivo do inventário").</div>'}</div>`;
         };
         return `<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
   <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Elas são criadas e concluídas no diário; aqui você acompanha e vê o dispositivo ligado. Dispositivo que fica OFFLINE no inventário abre uma pendência no diário automaticamente.</div>
@@ -2146,9 +2278,16 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       /* ---- dispositivo OFFLINE vira pendência no diário ----
          uma pendência aberta por dispositivo; só o básico (dispositivo, tipo, problema). Ações, diagnóstico e solução
          ficam em branco para quem for atender preencher no diário. */
-      async function abrePendOffline(cli, inv) {
+      async function abrePendOffline(cli, inv, invTodo = inv) {
         const off = [];
-        for (const [sis, d] of Object.entries(inv)) for (const it of (d && d.itens) || []) if (it.status === "OFFLINE") off.push([sis, it]);
+        for (const [sis, d] of Object.entries(inv))
+          for (const it of (d && d.itens) || []) {
+            if (it.status !== "OFFLINE") continue;
+            // o quadro de onde vem a rede também está sem rede: a pendência é do quadro, não do dispositivo
+            const q = quadroDoItem(invTodo, it);
+            if (q && SEM_REDE.includes(q.it.status)) continue;
+            off.push([sis, it]);
+          }
         if (!off.length) return 0;
         const f = cli.equipeId ? { clienteId: cli.id, equipeId: cli.equipeId } : { clienteId: cli.id };
         const abertas = (await DB.list("pendencias", f)).filter((p) => p.aberta);
@@ -2174,7 +2313,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             tipoId: t ? tId : "",
             sis: t ? t.sis : sisCat(sis),
             eqId: "",
-            problema: `Dispositivo OFFLINE no inventário${it.nvr ? ` (${it.nvr}${it.canal ? " canal " + it.canal : ""})` : ""}${it.ip ? " · IP " + it.ip : ""}`,
+            problema: ehQuadro(it)
+              ? `Quadro de distribuição sem rede (OFFLINE)${it.obs ? " · " + it.obs : ""}. Afeta os dispositivos ligados a este quadro.`
+              : `Dispositivo OFFLINE no inventário${it.nvr ? ` (${it.nvr}${it.canal ? " canal " + it.canal : ""})` : ""}${it.ip ? " · IP " + it.ip : ""}`,
             diag: "",
             acoes: [],
             solucao: "",
@@ -2196,6 +2337,47 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         }
         if (n) audita("abriu pendências de dispositivos offline", "pendencias", cli.id, `${cli.unidade || ""} · ${n} pendência(s)`);
         return n;
+      }
+      // pendências abertas automaticamente (sem nada preenchido) de dispositivos que agora dependem de um quadro sem rede: concluídas como "agrupadas"
+      async function agrupaNoQuadro(cli, devs, qTag) {
+        if (!devs.length) return 0;
+        const f = cli.equipeId ? { clienteId: cli.id, equipeId: cli.equipeId } : { clienteId: cli.id };
+        const ids = new Set(devs.map((d) => d.id));
+        const vazio = (p) => !String(p.diag || "").trim() && !String(p.solucao || "").trim() && !String(p.obs || "").trim() && !String(p.texto || "").trim() && !(p.acoes || []).length;
+        const L = (await DB.list("pendencias", f)).filter((p) => p.aberta && ids.has(p.dispId) && p.origem === "inventário" && vazio(p));
+        const d0 = new Date(),
+          hora = `${pad(d0.getHours())}:${pad(d0.getMinutes())}`;
+        for (const p of L) {
+          Object.assign(p, { aberta: false, concluidaEm: hoje(), concluidaPorId: (S.user && S.user.uid) || "", concluidaPorNome: meuNome(), solucao: `Agrupada na pendência do quadro ${qTag} (o quadro está sem rede).` });
+          p.historico = [...(p.historico || []), { data: hoje(), hora, ts: Date.now(), status: "Concluída", por: meuNome() + " (agrupada no quadro " + qTag + ")" }];
+          await DB.set("pendencias", p.id, p);
+        }
+        if (L.length) audita("agrupou pendências no quadro", "pendencias", cli.id, `${cli.unidade || ""} · ${qTag} · ${L.length}`);
+        return L.length;
+      }
+      // quadro voltou: os dispositivos ligados a ele que estavam sem rede voltam para ONLINE
+      async function cascataQuadro(q) {
+        const lig = ligadosAo(S.inv, q).filter((x) => SEM_REDE.includes(x.it.status));
+        const sists = new Set();
+        lig.forEach(({ sis, it }) => {
+          const doc = S.inv[sis],
+            n = doc.itens.find((i) => i.id === it.id);
+          n.statusOrigem = { titulo: "Quadro " + (q.tag || q.id) + " voltou", antes: n.status, depois: "ONLINE", em: agora(), por: meuNome() };
+          n.status = "ONLINE";
+          n.alteradoEm = agora();
+          n.alteradoPor = meuNome();
+          sists.add(sis);
+        });
+        for (const sis of sists) await salvaSistema(sis);
+        return lig.length;
+      }
+      // guarda o que já foi digitado no formulário de dispositivo novo (antes de redesenhar a tela)
+      function leNovo() {
+        if (!S.novo) return;
+        ["tipo", "tag", "ip", "pav", "nvr", "canal", "laco", "modelo", "fabricante", "login", "senha", "obs", "quadro", "status"].forEach((k) => {
+          const el = document.getElementById("n_" + k);
+          if (el) S.novo[k] = el.value;
+        });
       }
       async function salvaSistema(sis, aces) {
         const doc = clone(S.inv[sis]);
@@ -2299,13 +2481,19 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (!it) return;
           const doc = clone(S.inv[sis]),
             n = doc.itens.find((i) => i.id === it.id);
-          const stAntes = n.status;
+          const stAntes = n.status,
+            qAntes = n.quadro;
           if (pode("inv.editar")) {
             camposSis(sis).forEach((k) => {
               const el = $("#e_" + k);
               if (el) n[k] = k === "pav" ? normPav(el.value)[0] : k === "status" ? normSt(el.value) : k === "fabricante" ? el.value.trim().toUpperCase() : el.value.trim();
             });
             n.obs = $("#e_obs").value.trim();
+            const eq = $("#e_quadro");
+            if (eq) {
+              if (eq.value) n.quadro = eq.value;
+              else delete n.quadro;
+            }
             const tc = $("#e_tipoCat"),
               pf = $("#e_perfil");
             if (tc) {
@@ -2335,9 +2523,27 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           S.inv[sis] = doc;
           if (await salvaSistema(sis, mudouAc)) {
             if (mudouAc) audita("alterou senha", "inventarioAcessos", doc.id, `${cliNome(S.cliId)} · ${sis} · ${it.id}`);
-            let nPend = 0;
-            if (n.status === "OFFLINE" && stAntes !== "OFFLINE") nPend = await abrePendOffline(S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId }, { [sis]: { itens: [n] } }).catch((e) => (console.warn(e), 0));
-            toast(nPend ? "Dispositivo salvo · pendência aberta no diário" : "Dispositivo salvo");
+            const cli = S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId };
+            const msg = ["Dispositivo salvo"];
+            try {
+              if (n.status === "OFFLINE" && (stAntes !== "OFFLINE" || n.quadro !== qAntes) && (await abrePendOffline(cli, { [sis]: { itens: [n] } }, S.inv))) msg.push("pendência aberta no diário");
+              // ligado agora a um quadro sem rede: a pendência própria (vazia) passa para o quadro
+              const q = quadroDoItem(S.inv, n);
+              if (q && SEM_REDE.includes(q.it.status) && n.quadro !== qAntes && (await agrupaNoQuadro(cli, [n], q.it.tag))) msg.push("pendência agrupada no quadro " + q.it.tag);
+              if (ehQuadro(n)) {
+                const lig = ligadosAo(S.inv, n);
+                if (SEM_REDE.includes(n.status) && !SEM_REDE.includes(stAntes)) {
+                  const k = await agrupaNoQuadro(cli, lig.map((x) => x.it), n.tag);
+                  if (k) msg.push(k + " pendência(s) de dispositivos agrupada(s) neste quadro");
+                }
+                const semRede = lig.filter((x) => SEM_REDE.includes(x.it.status)).length;
+                if (["ONLINE", "OPERANDO"].includes(n.status) && SEM_REDE.includes(stAntes) && semRede && confirm(`O quadro ${n.tag} voltou (${n.status}).\n\nMarcar também como ONLINE os ${semRede} dispositivo(s) ligados a ele que estão sem rede?`)) msg.push((await cascataQuadro(n)) + " dispositivo(s) voltaram para ONLINE");
+              }
+            } catch (e) {
+              console.warn(e);
+              msg.push("(não consegui mexer nas pendências: " + (e.code || e.message) + ")");
+            }
+            toast(msg.join(" · "));
           }
         },
         async salvaCat() {
@@ -2439,15 +2645,54 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             toast("Dispositivo excluído");
           }
         },
-        async novoItem() {
-          const sis = S.aba,
-            doc = clone(S.inv[sis]);
+        novoItem(el) {
+          S.novo = { sis: (el && el.dataset.sis) || (S.inv[S.aba] ? S.aba : Object.keys(S.inv)[0] || "") };
+          render();
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        },
+        novoFecha() {
+          S.novo = null;
+          render();
+        },
+        novoSis(el) {
+          leNovo();
+          S.novo.sis = el.value;
+          render();
+        },
+        async novoSalva() {
+          leNovo();
+          const N = S.novo,
+            sis = N.sis;
+          if (!sis) return toast("Escolha o sistema");
+          if (!N.tipo && !N.tag && !N.ip) return toast("Preencha pelo menos o tipo, a TAG ou o IP");
+          const cli = S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId };
+          if (!S.inv[sis] && !pode("inv.importar")) return toast("Só o administrador cria um sistema novo no cliente");
+          const doc = S.inv[sis] ? clone(S.inv[sis]) : { id: docId(cli.id, sis), clienteId: cli.id, equipeId: cli.equipeId || "", sistema: sis, fabricante: "", itens: [], centrais: [] };
           const prox = (doc.itens || []).reduce((m, a) => Math.max(m, +String(a.id).split("-").pop() || 0), 0) + 1;
           const id = `${CODIGO[sis] || sis}-${String(prox).padStart(4, "0")}`;
-          doc.itens.push({ id, tipo: "", modelo: "", fabricante: "", tag: "", ip: "", pav: "", status: "", obs: "", origem: "cadastro manual" });
+          const it = { id, tipo: txt(N.tipo).toUpperCase(), modelo: txt(N.modelo), fabricante: txt(N.fabricante).toUpperCase(), tag: txt(N.tag), ip: txt(N.ip), pav: normPav(N.pav)[0], status: normSt(N.status), obs: txt(N.obs), origem: "cadastro manual em " + agora() + " por " + meuNome() };
+          (EXTRAS[sis] || []).forEach((k) => N[k] && (it[k] = txt(N[k])));
+          if (N.quadro) it.quadro = N.quadro;
+          it.alteradoEm = agora();
+          it.alteradoPor = meuNome();
+          doc.itens = [...(doc.itens || []), it];
           S.inv[sis] = doc;
-          Object.assign(S, { aberto: id, fBusca: id, fPav: "", fSt: "", fAl: false });
-          if (await salvaSistema(sis)) toast(`Dispositivo ${id} criado; preencha os dados`);
+          const novoSis = !S.aces[sis];
+          const temAc = (pode("inv.acesso") && (txt(N.login) || txt(N.senha))) || novoSis;
+          garanteAces(sis);
+          if (pode("inv.acesso") && (txt(N.login) || txt(N.senha))) S.aces[sis].acessos[id] = { login: txt(N.login), senha: txt(N.senha) };
+          if (!(await salvaSistema(sis, temAc))) return;
+          audita("cadastrou dispositivo", "inventario", doc.id, `${cliNome(S.cliId)} · ${sis} · ${id} ${it.tag}`);
+          const msg = [`Dispositivo ${id} cadastrado`];
+          try {
+            if (it.status === "OFFLINE" && (await abrePendOffline(cli, { [sis]: { itens: [it] } }, S.inv))) msg.push("pendência aberta no diário");
+          } catch (e) {
+            console.warn(e);
+          }
+          S.novo = null;
+          Object.assign(S, { aba: sis, aberto: id, fBusca: "", fPav: "", fSt: "", fAl: false, fSp: false });
+          toast(msg.join(" · "));
+          render();
         },
         sit(el) {
           // a troca da situação só vale ao clicar em Salvar (para dar tempo de escrever a justificativa)
@@ -2490,6 +2735,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             toast("Não consegui excluir: " + (e.code || e.message));
           }
         },
+        impModo(el) {
+          const I = S.imp;
+          I.modo = el.value;
+          if (I.res) I.res.inv = montaInventario(I.res, I.antigos || {}, I.antAces || {}, I.modo === "juntar");
+          render();
+        },
         async impSalva() {
           const I = S.imp;
           if (!I.res || !I.cliId) return;
@@ -2504,12 +2755,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               antAces = {};
             for (const d of await DB.list("inventario", { clienteId: cli.id })) antigos[d.sistema] = d;
             for (const d of await DB.list("inventarioAcessos", { clienteId: cli.id })) antAces[d.sistema] = d;
-            const inv = montaInventario(I.res, antigos, antAces);
+            const juntar = !!meta0 && I.modo === "juntar";
+            const inv = montaInventario(I.res, antigos, antAces, juntar);
             const novoAces = {};
             const novoInv = {};
             for (const [sis, itens] of Object.entries(inv)) {
               const id = docId(cli.id, sis);
               const blocos = I.res.centrais[sis] || {};
+              const manterCentrais = juntar && !Object.keys(blocos).length && antigos[sis];
               const pub = [],
                 sens = {};
               for (const [nome, campos] of Object.entries(blocos)) {
@@ -2540,12 +2793,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 return n;
               });
               const fab = Object.entries(limpos.reduce((o, i) => ((o[i.fabricante] = (o[i.fabricante] || 0) + (i.fabricante ? 1 : 0)), o), {})).sort((a, b) => b[1] - a[1])[0];
-              novoInv[sis] = { id, clienteId: cli.id, equipeId: eqId, sistema: sis, fabricante: fab ? fab[0] : "", itens: limpos, centrais: pub, atualizadoEm: agora(), atualizadoPor: meuNome() };
+              novoInv[sis] = { id, clienteId: cli.id, equipeId: eqId, sistema: sis, fabricante: fab ? fab[0] : "", itens: limpos, centrais: manterCentrais ? antigos[sis].centrais || [] : pub, atualizadoEm: agora(), atualizadoPor: meuNome() };
               await DB.set("inventario", id, novoInv[sis]);
-              novoAces[sis] = { id, clienteId: cli.id, equipeId: eqId, sistema: sis, acessos, centrais: sens };
+              novoAces[sis] = { id, clienteId: cli.id, equipeId: eqId, sistema: sis, acessos, centrais: manterCentrais ? (antAces[sis] && antAces[sis].centrais) || {} : sens };
               await DB.set("inventarioAcessos", id, novoAces[sis]);
             }
-            for (const sis of Object.keys(antigos))
+            for (const sis of juntar ? [] : Object.keys(antigos))
               if (!novoInv[sis]) {
                 await DB.del("inventario", antigos[sis].id);
                 await DB.del("inventarioAcessos", antigos[sis].id).catch(() => {});
@@ -2556,14 +2809,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               clienteNome: cli.unidade || "",
               equipeId: eqId,
               versao: ((meta0 && meta0.versao) || 0) + 1,
-              origem: I.nome,
-              nomeNaPlanilha: I.res.cliente,
+              origem: juntar && meta0 && meta0.origem ? `${meta0.origem} + ${I.nome}` : I.nome,
+              nomeNaPlanilha: I.res.cliente || (meta0 && meta0.nomeNaPlanilha) || "",
               importadoEm: agora(),
               importadoPor: meuNome(),
               atualizadoEm: agora(),
               atualizadoPor: meuNome(),
-              importAlertas: [...new Map(I.res.importAlertas.map((x) => [x.chave, x])).values()],
-              equivalencias: I.res.equivalencias,
+              importAlertas: [...new Map([...(juntar ? (meta0 && meta0.importAlertas) || [] : []), ...I.res.importAlertas].map((x) => [x.chave, x])).values()],
+              equivalencias: juntar ? [...((meta0 && meta0.equivalencias) || []), ...I.res.equivalencias] : I.res.equivalencias,
               decisoes: (meta0 && meta0.decisoes) || {},
               legenda: (meta0 && meta0.legenda) || {},
             };
@@ -2687,7 +2940,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             for (const d of await DB.list("inventario", { clienteId: I.cliId })) antigos[d.sistema] = d;
             for (const d of await DB.list("inventarioAcessos", { clienteId: I.cliId })) antAces[d.sistema] = d;
           }
-          res.inv = montaInventario(res, antigos, antAces);
+          I.antigos = antigos;
+          I.antAces = antAces;
+          if (!meta0) I.modo = "substituir";
+          else if (!I.modo) I.modo = "juntar";
+          res.inv = montaInventario(res, antigos, antAces, I.modo === "juntar");
           I.res = res;
           if (!I.cliId) {
             const alvo = semAcento(res.cliente).toUpperCase().replace(/^ED\.?\s*/, "").replace(/[^A-Z0-9]/g, "");
@@ -2761,6 +3018,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           return render();
         }
         if (t.id === "impArq" && t.files && t.files[0]) return leArquivo(t.files[0]);
+        if (t.id === "n_sis") return ACOES.novoSis(t);
         const f = t.dataset && t.dataset.f;
         if (f === "fPend") {
           S.fPend = t.value;
@@ -3060,6 +3318,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           alAt = al.filter(alertaAtivo),
           r = resumo(S.inv, m, S.aces);
         const pend = S.pend || [];
+        const usaQuadro = quadrosDe(S.inv).length > 0 || Object.values(S.inv).some((d) => (d.itens || []).some((i) => i.quadro));
         // colunas de cada aba de sistema (o painel usa as mesmas letras nas fórmulas)
         const colsSis = (sis) => [
           ["id", "ID", 11],
@@ -3071,6 +3330,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           ["ip", "IP", 15],
           ["pav", "Pavimento", 11],
           ...(EXTRAS[sis] || []).map((k) => [k, ROT[k], 9]),
+          ...(usaQuadro ? [["quadro", "Quadro", 18]] : []),
           ["status", "Status", 12],
           ["pend", "Pendências em aberto", 12],
           ["sconf", "Senha confirmada em", 17],

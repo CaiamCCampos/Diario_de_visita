@@ -2067,7 +2067,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             const itens = [];
             docs.forEach((d) =>
               (d.itens || []).forEach((it) =>
-                itens.push({ id: it.id, sis: d.sistema, tag: it.tag || "", ip: it.ip || "", pav: it.pav || "", tipo: it.tipo || "", status: it.status || "", tipoCat: it.tipoCat || mapa[`${d.sistema}|${String(it.tipo || "").toUpperCase()}`] || "" }),
+                itens.push({ id: it.id, sis: d.sistema, tag: it.tag || "", ip: it.ip || "", pav: it.pav || "", tipo: it.tipo || "", status: it.status || "", quadro: it.quadro || "", tipoCat: it.tipoCat || mapa[`${d.sistema}|${String(it.tipo || "").toUpperCase()}`] || "" }),
               ),
             );
             const mudou = JSON.stringify(itens) !== JSON.stringify(S.invCli[c.id].itens);
@@ -2118,8 +2118,52 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const atual = L.find((d) => d.id === val(b + ".dispId"));
         const rot = filtrou ? `Dispositivo do inventário · ${esc(sis)} (${lista.length})` : `Dispositivo do inventário (${L.length})`;
         const inp = `<div><label>${rot}</label>${lista.length > 25 ? `<input data-dfil="${esc(b)}" placeholder="Filtrar a lista: TAG, IP, pavimento ou tipo" autocomplete="off" style="margin-bottom:6px">` : ""}<select data-disp="${esc(b)}">${opcoesDisp(b, c)}</select>${atual ? `<div class="sm" data-dsit="${esc(atual.id)}">${esc(atual.sis)} · situação no inventário: <b>${esc(atual.status || "—")}</b></div>` : !filtrou ? '<div class="sm">Escolha o tipo de equipamento para ver só os dispositivos do sistema da pendência.</div>' : ""}</div>`;
-        const sit = atual ? fSel(b + ".dispStatus", "Situação do dispositivo (vai para o inventário)", [["", "— não alterar —"], ...SIT_DISP.map((x) => [x, x])]) : "";
+        let sit = atual ? fSel(b + ".dispStatus", "Situação do dispositivo (vai para o inventário)", [["", "— não alterar —"], ...SIT_DISP.map((x) => [x, x])]) : "";
+        if (atual && ehQuadroD(atual)) {
+          const lig = ligadosD(L, atual),
+            sr = lig.filter((d) => SEM_REDE_D.includes(d.status));
+          sit += `<div class="sm" style="grid-column:1/-1">Quadro de distribuição: ${lig.length} dispositivo(s) ligado(s), <b>${sr.length} sem rede</b>${sr.length ? ": " + sr.slice(0, 40).map((d) => esc(d.tag || d.id)).join(", ") + (sr.length > 40 ? "…" : "") : ""}. Ao marcar ONLINE, o sistema pergunta se eles voltam junto.</div>`;
+        }
         return { inp, sit };
+      }
+      // quadros de distribuição: dispositivos do tipo QUADRO…; os outros dizem de qual quadro recebem rede (campo quadro = TAG do quadro)
+      const ehQuadroD = (d) => /QUADRO/i.test(semAc(d && d.tipo));
+      const nQ = (x) => semAc(x || "").toUpperCase().trim();
+      const ligadosD = (L, q) => L.filter((d) => d.quadro && nQ(d.quadro) === nQ(q.tag) && d.id !== q.id);
+      const SEM_REDE_D = ["OFFLINE", "FALHA"];
+      // quadro voltou: pergunta e devolve para ONLINE os dispositivos ligados a ele que estavam sem rede
+      async function cascataQuadroD(p) {
+        const ci = S.invCli[p.clienteId],
+          L = ci ? ci.itens : [];
+        const q = L.find((d) => d.id === p.dispId);
+        if (!q || !ehQuadroD(q)) return;
+        const sr = ligadosD(L, q).filter((d) => SEM_REDE_D.includes(d.status));
+        if (!sr.length || !confirm(`O quadro ${q.tag} voltou (${p.dispStatus}).\n\nMarcar também como ONLINE os ${sr.length} dispositivo(s) ligados a ele que estão sem rede?`)) return;
+        const porSis = {};
+        sr.forEach((d) => (porSis[d.sis] = porSis[d.sis] || []).push(d.id));
+        const d0 = new Date(),
+          quando = `${bd(hoje())} ${pad(d0.getHours())}:${pad(d0.getMinutes())}`;
+        let n = 0;
+        for (const [sis, ids] of Object.entries(porSis))
+          await naFila(async () => {
+            const id = `${p.clienteId}__${semAc(sis).toUpperCase()}`;
+            const doc = await DB.get("inventario", id);
+            if (!doc) return;
+            (doc.itens || []).forEach((it) => {
+              if (!ids.includes(it.id) || !SEM_REDE_D.includes(it.status)) return;
+              it.statusOrigem = { pendId: p.id, titulo: "Quadro " + q.tag + " voltou", antes: it.status, depois: "ONLINE", em: quando, por: S.me.nome || "" };
+              it.status = "ONLINE";
+              it.alteradoEm = quando;
+              it.alteradoPor = S.me.nome || "";
+              n++;
+            });
+            doc.atualizadoEm = quando;
+            doc.atualizadoPor = S.me.nome || "";
+            await DB.set("inventario", id, doc);
+          });
+        sr.forEach((d) => (d.status = "ONLINE"));
+        if (DB.audit) DB.audit("quadro voltou: dispositivos ligados para ONLINE", "inventario", p.clienteId, `${q.tag} · ${n}`);
+        toast(`${n} dispositivo(s) do quadro ${q.tag} voltaram para ONLINE no inventário`);
       }
       // grava no inventário a situação escolhida na pendência (só quando muda; não impede salvar a pendência)
       const dispEmCurso = new Map();
@@ -2161,6 +2205,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (xi) xi.status = p.dispStatus;
           document.querySelectorAll("[data-dsit]").forEach((el) => el.dataset.dsit === p.dispId && (el.querySelector("b").textContent = p.dispStatus));
           fim(true);
+          if (SIT_OK.includes(p.dispStatus)) cascataQuadroD(p).catch((e) => console.warn(e));
         } catch (e) {
           console.warn(e);
           fim(false);
