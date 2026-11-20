@@ -1355,8 +1355,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       const alertaAtivo = (a) => a.sit !== "OK";
 
       /* ---- pendências do diário ligadas aos dispositivos ----
-         por enquanto o diário guarda o tipo do catálogo (tipoId); o dispositivo exato (dispId) entra na próxima etapa.
-         Até lá, liga pela TAG citada no título/problema da pendência. */
+         a pendência do diário guarda o dispositivo escolhido (dispId, dispTag…) e a situação marcada (dispStatus),
+         que o próprio diário grava no item do inventário (item.status + item.statusOrigem).
+         Pendências antigas, sem dispositivo escolhido, ligam pela TAG citada no título/problema. */
       const pendSis = (p) => {
         const t = tipoCat(p.tipoId);
         const sg = (t && t.sis) || p.sis || "";
@@ -1816,6 +1817,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   <div class="g">${camposSis(sis).map(campo).join("")}</div>
   <div class="g">${acessos}</div>${vItemCat(sis, it)}${vItemDetalhes(sis, it)}${vItemPend(it)}
   <label>Observação</label><textarea id="e_obs" rows="2"${ed ? "" : " readonly"}>${esc(it.obs || "")}</textarea>
+  ${it.statusOrigem ? `<div class="sm" style="margin-top:6px">Situação <b>${esc(it.statusOrigem.depois || it.status)}</b> marcada pelo diário em ${esc(it.statusOrigem.em || "")}${it.statusOrigem.por ? " por " + esc(it.statusOrigem.por) : ""}${it.statusOrigem.antes ? " (antes: " + esc(it.statusOrigem.antes) + ")" : ""}${it.statusOrigem.titulo ? " · pendência: " + esc(it.statusOrigem.titulo) : ""}</div>` : ""}
   <div class="sm" style="margin-top:6px">${it.verificado ? `<span class="ver">Senha confirmada em <b>${dh(it.verificado)}</b>${it.verificadoPor ? " por " + esc(it.verificadoPor) : ""}</span>` : temSenha(credDe(sis, it, S.aces)) ? '<span class="st FALHA">Senha a confirmar</span>' : "Sem login/senha cadastrados."}${it.alteradoEm ? ` · última alteração em ${esc(it.alteradoEm)}${it.alteradoPor ? " por " + esc(it.alteradoPor) : ""}` : ""}</div>
   <div>${ed || edA ? `<button class="b" data-a="salvaItem">Salvar alterações</button>` : ""}${pode("inv.confirmar") ? `<button class="b o" data-a="confirma">Senha OK (confirmar agora)</button>` : ""}${pode("inv.excluir") ? `<button class="b o" data-a="excluiItem">Excluir dispositivo</button>` : ""}<button class="b o" data-a="fechaItem">Fechar</button></div>`;
       }
@@ -1844,7 +1846,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const l = pendDoItem(it.id);
         if (!l.length) return "";
         return `<div class="cent"><b class="rd">Pendências do diário</b>${l
-          .map((p) => `<div class="sm" style="margin-top:4px">${p.aberta ? '<span class="st FALHA">em aberto</span>' : '<span class="st ONLINE">concluída</span>'} <b>${esc(p.titulo || "(sem título)")}</b> · aberta em ${bd(p.criada)}${!p.aberta && p.concluidaEm ? " · concluída em " + bd(p.concluidaEm) : ""}</div>`)
+          .map((p) => `<div class="sm" style="margin-top:4px">${p.aberta ? '<span class="st FALHA">em aberto</span>' : '<span class="st ONLINE">concluída</span>'} <b>${esc(p.titulo || "(sem título)")}</b> · aberta em ${bd(p.criada)}${!p.aberta && p.concluidaEm ? " · concluída em " + bd(p.concluidaEm) : ""}${p.dispId === it.id && p.dispStatus ? ` · situação marcada: <span class="st ${esc(p.dispStatus)}">${esc(p.dispStatus)}</span>` : ""}</div>`)
           .join("")}</div>`;
       }
       function vItemDetalhes(sis, it) {
@@ -1983,7 +1985,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           return `<div class="al ${p.aberta ? "NOK" : "OK"}" style="opacity:1"><div class="t"><b>${esc(p.titulo || "(sem título)")}</b><span class="chip ${p.aberta ? "red" : "ok"}">${p.aberta ? "Em aberto há " + dias(p.criada, hoje()) + " dia(s)" : "Concluída " + bd(p.concluidaEm)}</span></div>
   <div class="sm">${pendSis(p) ? `<b>${esc(pendSis(p))}</b>` : ""}${t ? " · " + esc(t.nome) : ""}${p.status ? " · " + esc(p.status) : ""} · aberta por ${esc(p.criadaPorNome || "(sem registro)")} em ${bd(p.criada)}${!p.aberta && p.concluidaEm ? ` · concluída em ${bd(p.concluidaEm)}${p.concluidaPorNome ? " por " + esc(p.concluidaPorNome) : ""}` : ""}</div>
   ${p.problema ? `<div class="sm" style="margin-top:4px">${esc(p.problema)}</div>` : ""}${!p.aberta && p.solucao ? `<div class="sm" style="margin-top:4px"><b>Solução:</b> ${esc(p.solucao)}</div>` : ""}
-  ${ids.length ? `<div class="ids sm">${p.dispId ? "Dispositivo" : "TAG citada"}: ${ids.map((id) => `<a data-a="vaiItem" data-id="${esc(id)}">${esc(id)}</a>`).join("")}</div>` : '<div class="sm" style="color:var(--d)">Sem dispositivo ligado (a ligação direta vem quando o diário passar a escolher o dispositivo do inventário).</div>'}</div>`;
+  ${ids.length ? `<div class="ids sm">${p.dispId ? "Dispositivo" : "TAG citada"}: ${ids.map((id) => `<a data-a="vaiItem" data-id="${esc(id)}">${esc(id)}</a>`).join("")}${p.dispId && p.dispTag ? " " + esc(p.dispTag) : ""}${p.dispId && p.dispStatus ? ` · situação marcada: <span class="st ${esc(p.dispStatus)}">${esc(p.dispStatus)}</span>` : ""}</div>` : '<div class="sm" style="color:var(--d)">Sem dispositivo ligado. No diário, escolha o dispositivo na pendência (campo "Dispositivo do inventário").</div>'}</div>`;
         };
         return `<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
   <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Elas são criadas e concluídas no diário; aqui você acompanha e vê o dispositivo ligado.</div>
@@ -2173,6 +2175,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (!it) return;
           const doc = clone(S.inv[sis]),
             n = doc.itens.find((i) => i.id === it.id);
+          const stAntes = n.status;
           if (pode("inv.editar")) {
             camposSis(sis).forEach((k) => {
               const el = $("#e_" + k);
@@ -2202,6 +2205,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               delete n.verificadoPor;
             }
           }
+          if (n.statusOrigem && n.status !== stAntes) delete n.statusOrigem; // situação trocada aqui no inventário
           n.alteradoEm = agora();
           n.alteradoPor = meuNome();
           S.inv[sis] = doc;

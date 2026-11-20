@@ -1102,7 +1102,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (!gravando) gravIni = Date.now();
         gravando++;
         showSave();
-        const p = (col === "catalogo" ? juntaCatalogo(data) : Promise.resolve(data))
+        const p = (col === "catalogo" ? juntaCatalogo(data) : col === "pendencias" ? aplicaDisp(data) : Promise.resolve(data))
           .then((d) => DB.set(col, id, d))
           .catch((e) => {
             console.error(e);
@@ -2051,7 +2051,111 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         ["", "— nenhum / assunto geral —"],
         ...((c && c.eqs) || []).map((e) => [e.id, `${tp(e.tipo).sis} · ${tp(e.tipo).nome} · ${nmEq(e)}`]),
       ];
+      /* ---- Inventário (inventario.html): a pendência escolhe o dispositivo e pode mudar a situação dele ---- */
+      const SIT_DISP = ["ONLINE", "OPERANDO", "VERIFICAR", "FALHA", "OFFLINE"];
+      const semAc = (x) => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const dispTxt = (d) => [d.id, d.tag || "(sem TAG)", d.ip, d.pav].filter(Boolean).join(" · ");
+      S.invCli = {}; // clienteId -> { itens: [...] } (dispositivos do inventário, carregados quando precisa)
+      function invDoCliente(c) {
+        if (!c || !c.id) return [];
+        const x = S.invCli[c.id];
+        if (x && Date.now() - x.t < 600000) return x.itens; // relê o inventário a cada 10 minutos
+        S.invCli[c.id] = { itens: x ? x.itens : [], t: Date.now() };
+        (async () => {
+          try {
+            const [docs, cfg] = await Promise.all([DB.list("inventario", fCli(c)), DB.get("inventarioConfig", "geral").catch(() => null)]);
+            const mapa = (cfg && cfg.mapa) || {};
+            const itens = [];
+            docs.forEach((d) =>
+              (d.itens || []).forEach((it) =>
+                itens.push({ id: it.id, sis: d.sistema, tag: it.tag || "", ip: it.ip || "", pav: it.pav || "", tipo: it.tipo || "", status: it.status || "", tipoCat: it.tipoCat || mapa[`${d.sistema}|${String(it.tipo || "").toUpperCase()}`] || "" }),
+              ),
+            );
+            const mudou = JSON.stringify(itens) !== JSON.stringify(S.invCli[c.id].itens);
+            S.invCli[c.id] = { itens, t: Date.now() };
+            if (mudou) render();
+          } catch (e) {
+            console.warn("inventário do cliente", e.code || e.message);
+          }
+        })();
+        return [];
+      }
+      function campoDisp(b, c) {
+        const L = invDoCliente(c);
+        if (!L.length) return { inp: "", sit: "" };
+        const tId = val(b + ".tipoId"),
+          cand = tId ? L.filter((d) => d.tipoCat === tId) : [],
+          opc = cand.length ? cand : L;
+        const atual = L.find((d) => d.id === val(b + ".dispId"));
+        const dl = "dl_" + b.replace(/\W/g, "_");
+        const inp = `<div><label>Dispositivo do inventário${cand.length ? ` (${cand.length} deste tipo)` : ""}</label><input data-disp="${esc(b)}" list="${dl}" value="${esc(atual ? dispTxt(atual) : val(b + ".dispId") || "")}" placeholder="Digite a TAG, o IP ou o ID e escolha" autocomplete="off"><datalist id="${dl}">${opc.map((d) => `<option value="${esc(dispTxt(d))}">`).join("")}</datalist>${atual ? `<div class="sm" data-dsit="${esc(atual.id)}">${esc(atual.sis)} · situação no inventário: <b>${esc(atual.status || "—")}</b></div>` : ""}</div>`;
+        const sit = atual ? fSel(b + ".dispStatus", "Situação do dispositivo (vai para o inventário)", [["", "— não alterar —"], ...SIT_DISP.map((x) => [x, x])]) : "";
+        return { inp, sit };
+      }
+      // grava no inventário a situação escolhida na pendência (só quando muda; não impede salvar a pendência)
+      const dispEmCurso = new Map();
+      let filaInv = Promise.resolve(); // uma gravação de inventário por vez (várias pendências podem mexer no mesmo documento)
+      const naFila = (fn) => (filaInv = filaInv.then(fn, fn));
+      async function aplicaDisp(p) {
+        if (!p || !p.dispId || !p.dispStatus || !p.dispSis || !p.clienteId) return p;
+        const chave = `${p.dispId}|${p.dispStatus}`;
+        if (p.dispAplicado === chave) return p;
+        const k = p.id + "|" + chave;
+        if (dispEmCurso.has(k)) {
+          if (await dispEmCurso.get(k)) p.dispAplicado = chave;
+          return p;
+        }
+        let fim;
+        dispEmCurso.set(k, new Promise((r) => (fim = r)));
+        try {
+          const id = `${p.clienteId}__${semAc(p.dispSis).toUpperCase()}`;
+          await naFila(async () => {
+            const doc = await DB.get("inventario", id);
+            const it = doc && (doc.itens || []).find((x) => x.id === p.dispId);
+            if (!it) throw new Error("dispositivo não encontrado no inventário");
+            if (it.status === p.dispStatus) return; // já está assim: nada a gravar
+            const d = new Date(),
+              quando = `${bd(hoje())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            it.statusOrigem = { pendId: p.id, titulo: p.titulo || "", antes: it.status || "", depois: p.dispStatus, em: quando, por: S.me.nome || "" };
+            it.status = p.dispStatus;
+            it.alteradoEm = quando;
+            it.alteradoPor = S.me.nome || "";
+            doc.atualizadoEm = quando;
+            doc.atualizadoPor = S.me.nome || "";
+            await DB.set("inventario", id, doc);
+            if (DB.audit) DB.audit("situação do dispositivo pela pendência", "inventario", id, `${p.dispId} ${it.statusOrigem.antes || "—"} → ${p.dispStatus} · ${p.titulo || ""}`);
+          });
+          p.dispAplicado = chave;
+          [...(S.pc || []), ...((S.visit && S.visit.pend) || [])].forEach((x) => x.id === p.id && (x.dispAplicado = chave));
+          const ci = S.invCli[p.clienteId],
+            xi = ci && ci.itens.find((y) => y.id === p.dispId);
+          if (xi) xi.status = p.dispStatus;
+          document.querySelectorAll("[data-dsit]").forEach((el) => el.dataset.dsit === p.dispId && (el.querySelector("b").textContent = p.dispStatus));
+          fim(true);
+        } catch (e) {
+          console.warn(e);
+          fim(false);
+          toast("A pendência foi salva, mas não consegui atualizar o inventário: " + (e.code === "permission-denied" ? "sem permissão" : e.code || e.message));
+        } finally {
+          dispEmCurso.delete(k);
+        }
+        return p;
+      }
+      const SIT_OK = ["ONLINE", "OPERANDO"];
+      // ao concluir: se o dispositivo ficou como OFFLINE/FALHA/VERIFICAR, pergunta se volta para ONLINE
+      function perguntaOnline(p, cliId) {
+        if (!p || !p.dispId) return false;
+        const ci = S.invCli[cliId || p.clienteId],
+          L = ci ? ci.itens : [];
+        const d = L.find((x) => x.id === p.dispId);
+        const agora = p.dispStatus || (d && d.status) || "";
+        if (!agora || SIT_OK.includes(agora)) return false;
+        if (!confirm(`O dispositivo ${p.dispTag || p.dispId} está como ${agora} no inventário.\n\nMarcar como ONLINE ao concluir?`)) return false;
+        p.dispStatus = "ONLINE";
+        return true;
+      }
       const itemFields = (b, semStatus, soSolucao, c) => {
+        const dsp = campoDisp(b, c);
         const a =
           fIn(b + ".titulo", "Equipamento / assunto") +
           fSel(b + ".tipoId", "Tipo de equipamento (todos do catálogo)", [["", "— nenhum / assunto geral —"], ...S.cat.tipos.map((t) => [t.id, `${t.sis} · ${t.nome}`])]) +
@@ -2063,6 +2167,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           fIn(b + ".titulo", "Equipamento / assunto") +
           fSel(b + ".tipoId", "Tipo de equipamento (todos do catálogo)", [["", "— nenhum / assunto geral —"], ...S.cat.tipos.map((t) => [t.id, `${t.sis} · ${t.nome}`])]) +
           (c && c.eqs && c.eqs.length ? fSel(b + ".eqId", "Equipamento do cliente (opcional)", eqOpcoes(c)) : "") +
+          (dsp.inp ? `<div class="g">${dsp.inp}${soSolucao ? "" : dsp.sit}</div>` : "") +
           fTa(b + ".problema", "Problema reportado", { rows: 2 }) +
           fTa(b + ".diag", "Diagnóstico", { rows: 2 });
         const ac = fTa(b + ".acoes", "Ações executadas (uma por linha)", { lines: true, rows: 3 });
@@ -2070,7 +2175,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const ob = fTa(b + ".obs", "Observação técnica", { rows: 2 }) + fTa(b + ".texto", "Texto livre (opcional)", { rows: 2 });
         const st = semStatus ? "" : fIn(b + ".status", "Status", { list: "dlStatus" });
         // quem conclui a pendência de outro técnico escreve ações, solução, observação e texto livre; o resto fica travado
-        return soSolucao ? ro(a1, false) + ac + sol + ob + ro(st, false) : a1 + ac + sol + ob + st;
+        return soSolucao ? ro(a1, false) + (dsp.sit ? `<div class="g">${dsp.sit}</div>` : "") + ac + sol + ob + ro(st, false) : a1 + ac + sol + ob + st;
       };
       function vCliPend(modo = "abertas") {
         const conc = modo === "concluidas",
@@ -2096,7 +2201,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const sub = !dentro && e && tit.trim().toLowerCase() !== rot.trim().toLowerCase() ? `<span class="sm sub">${esc(tit)}</span>` : "";
           return `<details class="eq"${p.id === S.pcAberto ? " open" : ""}>
     <summary><b class="rd">${esc(rot)}</b> <span class="chip ${p.aberta ? "red" : "ok"}">${p.aberta ? "Em aberto · " + idadeTxt(p.criada).replace("aberta ", "") : "Concluída " + bd(p.concluidaEm)}</span>${sub}</summary>
-    <div class="sm" style="margin:6px 0">Aberta${p.criadaPorNome ? " por " + esc(p.criadaPorNome) : ""} em ${bd(p.criada)}${p.status ? " · " + esc(p.status) : ""}</div>
+    <div class="sm" style="margin:6px 0">Aberta${p.criadaPorNome ? " por " + esc(p.criadaPorNome) : ""} em ${bd(p.criada)}${p.status ? " · " + esc(p.status) : ""}${p.dispId ? ` · Dispositivo: <b>${esc(p.dispTag || p.dispId)}</b>${p.dispStatus ? ` (${esc(p.dispStatus)})` : ""}` : ""}</div>
     ${full ? "" : '<p class="sm">Você pode preencher ações executadas, solução proposta, observação técnica e texto livre, e concluir. O restante só quem abriu, o supervisor e o admin alteram.</p>'}
     ${itemFields(`pc.${i}`, false, !full, c)}
     ${(p.historico || []).length ? `<details class="hist"><summary>Histórico de alterações (${p.historico.length})</summary>${[...p.historico].sort((x, y) => (x.ts || 0) - (y.ts || 0) || String(x.data || "").localeCompare(String(y.data || ""))).map((h) => `<div class="hl"><b>${bd(h.data)}${h.hora ? " " + esc(h.hora) : ""}</b> · ${esc(h.status || "")}${h.por ? " · " + esc(h.por) : ""}${(h.alt || []).map((a) => `<div class="sm hlc"><i>${esc(a.c)}:</i> ${a.de ? "<s>" + esc(a.de) + "</s> para " : ""}${esc(a.para) || "(vazio)"}</div>`).join("")}</div>`).join("")}</details>` : ""}
@@ -2175,7 +2280,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   ${v.pend
     .map((p, i) => {
       const full = podeEditarPend(p);
-      return `<div class="eq"><b>${esc(p.titulo || "(sem título)")}</b>${full ? fIn(`visit.pend.${i}.status`, "Status", { list: "dlStatus" }) : `<p class="sm">Status: ${esc(p.status || "")} · aberta por ${esc(p.criadaPorNome || "outro usuário")}. Aqui você só escreve a solução e conclui.</p>`}${fChk(`visit.pend.${i}.concluir`, "Concluída nesta visita")}
+      return `<div class="eq"><b>${esc(p.titulo || "(sem título)")}</b>${p.dispId ? ` <span class="sm">· ${esc(p.dispTag || p.dispId)}${p.dispStatus ? " (" + esc(p.dispStatus) + ")" : ""}</span>` : ""}${full ? fIn(`visit.pend.${i}.status`, "Status", { list: "dlStatus" }) : `<p class="sm">Status: ${esc(p.status || "")} · aberta por ${esc(p.criadaPorNome || "outro usuário")}. Aqui você só escreve a solução e conclui.</p>`}${fChk(`visit.pend.${i}.concluir`, "Concluída nesta visita")}
     <details${p.nova ? " open" : ""}><summary>${full ? "Editar detalhes" : "Detalhes e solução"}</summary>${itemFields(`visit.pend.${i}`, true, !full, c)}</details>${full ? `<button class="b o s" data-a="delPend" data-i="${i}">${p.nova ? "remover" : "Excluir pendência"}</button>` : ""}</div>`;
     })
     .join("")}
@@ -3580,6 +3685,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           }
         }
         if (/^cli\.eqs\.\d+\.tipo$/.test(p)) setPath(p.replace(/tipo$/, "perfil"), 0);
+        // marcou "Concluída nesta visita" / "Resolvido nesta visita": oferece voltar o dispositivo para ONLINE
+        if (v === true && /^visit\.(pend\.\d+\.concluir|itens\.\d+\.resolvido)$/.test(p) && perguntaOnline(val(p.replace(/\.\w+$/, "")), S.vcli && S.vcli.id)) {
+          afterChange(p);
+          render();
+          return;
+        }
         afterChange(p);
         if ("r" in el.dataset) render();
       });
@@ -3608,6 +3719,30 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         true,
       );
       document.addEventListener("change", (e) => {
+        if (e.target.dataset && e.target.dataset.disp !== undefined) {
+          const b = e.target.dataset.disp,
+            t = e.target.value.trim();
+          const cl = b.startsWith("pc.") ? S.cli : S.vcli;
+          const L = invDoCliente(cl);
+          const id = t.split(" · ")[0].trim();
+          const d = L.find((x) => x.id === id) || L.find((x) => x.tag && x.tag.toUpperCase() === t.toUpperCase());
+          if (d) {
+            [["dispId", d.id], ["dispSis", d.sis], ["dispTag", d.tag], ["dispIp", d.ip], ["dispPav", d.pav]].forEach(([k, v]) => setPath(b + "." + k, v));
+            if (!val(b + ".tipoId") && d.tipoCat && S.cat.tipos.some((x) => x.id === d.tipoCat)) {
+              setPath(b + ".tipoId", d.tipoCat);
+              setPath(b + ".sis", tp(d.tipoCat).sis);
+            }
+            if (!String(val(b + ".titulo") || "").trim()) setPath(b + ".titulo", d.tag || d.id);
+          } else if (!t) ["dispId", "dispSis", "dispTag", "dispIp", "dispPav", "dispStatus"].forEach((k) => setPath(b + "." + k, ""));
+          else {
+            toast("Escolha um dispositivo da lista");
+            return;
+          }
+          if (b.startsWith("pc.")) S.pcAberto = S.pc[+b.split(".")[1]].id;
+          afterChange(b + ".dispId");
+          render();
+          return;
+        }
         if (e.target.id === "simgofile") {
           simGoFile = e.target.files[0] || null;
           e.target.value = "";
@@ -3887,7 +4022,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           toast("Não consegui abrir a visita.");
         }
       }
-      const CAMPOS_PEND = [["titulo","Equipamento / assunto"],["tipoId","Tipo"],["eqId","Equipamento do cliente"],["problema","Problema reportado"],["diag","Diagnóstico"],["acoes","Ações executadas"],["solucao","Solução proposta"],["obs","Observação técnica"],["texto","Texto livre"],["status","Status"]];
+      const CAMPOS_PEND = [["titulo","Equipamento / assunto"],["tipoId","Tipo"],["eqId","Equipamento do cliente"],["problema","Problema reportado"],["diag","Diagnóstico"],["acoes","Ações executadas"],["solucao","Solução proposta"],["obs","Observação técnica"],["texto","Texto livre"],["status","Status"],["dispTag","Dispositivo do inventário"],["dispStatus","Situação do dispositivo"]];
       const vTxt = (v) => (Array.isArray(v) ? v.join("; ") : v == null ? "" : String(v)).trim();
       const difPend = (a, b) => {
         const r = [];
@@ -3909,6 +4044,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         }
         gravar("pendencias", p.id, semTransitorios(p));
       }
+      const dispDe = (it) => ({ dispId: it.dispId || "", dispSis: it.dispSis || "", dispTag: it.dispTag || "", dispIp: it.dispIp || "", dispPav: it.dispPav || "", dispStatus: it.dispStatus || "" });
       const pushHist = (p, e) => {
         p.historico = (p.historico || []).filter((h) => h.visitaId !== e.visitaId);
         p.historico.push(e);
@@ -3951,6 +4087,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               if (!cur) continue;
               const antes = baseP(cur);
               ["acoes", "solucao", "obs", "texto"].forEach((k) => (cur[k] = p[k]));
+              if (cur.dispId && p.dispStatus !== undefined) cur.dispStatus = p.dispStatus;
               const dif = difPend(antes, cur);
               if (p.concluir && cur.aberta) {
                 cur.aberta = false;
@@ -3999,6 +4136,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 eqId: it.eqId || "",
                 tipoId: eqIt ? eqIt.tipo : it.tipoId || "",
                 sis: eqIt ? tp(eqIt.tipo).sis : it.tipoId ? tp(it.tipoId).sis : "",
+                ...dispDe(it),
                 titulo: it.titulo,
                 problema: it.problema,
                 diag: it.diag,
@@ -4023,6 +4161,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 eqId: it.eqId || "",
                 tipoId: eqIt ? eqIt.tipo : it.tipoId || "",
                 sis: eqIt ? tp(eqIt.tipo).sis : it.tipoId ? tp(it.tipoId).sis : "",
+                ...dispDe(it),
                 titulo: it.titulo, problema: it.problema, diag: it.diag, acoes: it.acoes || [], solucao: it.solucao, obs: it.obs, texto: it.texto,
                 status: it.status || "Concluída",
                 aberta: false, concluidaEm: data, concluidaPorId: S.user.uid, concluidaPorNome: S.me.nome,
@@ -4462,6 +4601,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         },
         pcClose(el) {
           const p = S.pc[+el.dataset.i];
+          perguntaOnline(p);
           flushAll();
           commitPend(p);
           p.aberta = false;
