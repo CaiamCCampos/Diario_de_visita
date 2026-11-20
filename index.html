@@ -2031,7 +2031,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           muda = [];
         for (const [tid, ds] of Object.entries(grupos)) {
           const t = tp(tid);
-          const indiv = (S.invSel || {})[tid] === "todos" || ds.length <= 3;
+          // quadros/switches, NVRs e centrais entram sempre um a um (cada um tem nome e situação próprios)
+          const indiv = (S.invSel || {})[tid] === "todos" || ds.length <= 3 || ds.every((d) => ehQuadroD(d) || /\b(NVR|DVR|CENTRAL)\b/.test(semAc(d.tipo).toUpperCase()));
           if (indiv)
             ds.forEach((d) => {
               const ex = eqs.find((e) => e.invId === d.id) || eqs.find((e) => !e.invId && !e.invTipo && e.tipo === tid && semAc(e.nome).trim().toUpperCase() === semAc(d.tag).trim().toUpperCase());
