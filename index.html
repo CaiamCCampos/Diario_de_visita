@@ -1971,7 +1971,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (S.tab === "dados") h += ro(vCliDados(), editaCli);
         else if (S.tab === "equip") {
           const soLocal = !editaCli && !exc && (S.me || {}).papel === "tecnico";
-          h += soLocal ? '<div class="note">Você pode alterar o <b>Local</b> de cada equipamento. Os demais dados só o supervisor altera.</div>' + vCliEquip(true) : ro(vCliEquip(), editaCli);
+          h += soLocal ? '<div class="note">Você pode alterar o <b>Local</b> de cada equipamento. Os demais dados só o supervisor altera.</div>' + vCliEquip(true) : (editaCli && !exc ? vPuxaInv(c) : "") + ro(vCliEquip(), editaCli);
         }
         else if (S.tab === "visitas" && !exc) h += vCliVisitas();
         else if (S.tab === "acesso" && !exc) h += vCliAcesso();
@@ -2017,6 +2017,56 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   <button class="b o" data-a="archCli">${S.cli.arquivado ? "Reativar cliente" : "Arquivar cliente"}</button><button class="b o" data-a="delCli">Excluir cliente</button>
   <p class="sm">Arquivar esconde o cliente das listas, sem apagar visitas nem pendências. Excluir apaga o cliente, as visitas e as pendências dele.</p>`,
         );
+      }
+      /* ---- Equipamentos do cliente puxados do Inventário (inventario.html) ----
+         tipos marcados "Todos" no inventário ou com até 3 dispositivos: 1 equipamento por dispositivo (nome = TAG, local = pavimento);
+         os demais viram 1 equipamento agrupado por tipo ("Câmeras fixas (80)"). Nada é apagado; puxar de novo só atualiza. */
+      function planoPuxa(c) {
+        const L = invDoCliente(c).filter((d) => d.tipoCat && S.cat.tipos.some((t) => t.id === d.tipoCat));
+        const semTipo = invDoCliente(c).length - L.length;
+        const grupos = {};
+        L.forEach((d) => (grupos[d.tipoCat] = grupos[d.tipoCat] || []).push(d));
+        const eqs = c.eqs || [];
+        const novos = [],
+          muda = [];
+        for (const [tid, ds] of Object.entries(grupos)) {
+          const t = tp(tid);
+          const indiv = (S.invSel || {})[tid] === "todos" || ds.length <= 3;
+          if (indiv)
+            ds.forEach((d) => {
+              const ex = eqs.find((e) => e.invId === d.id) || eqs.find((e) => !e.invId && !e.invTipo && e.tipo === tid && semAc(e.nome).trim().toUpperCase() === semAc(d.tag).trim().toUpperCase());
+              const alvo = { invId: d.id, tipo: tid, nome: d.tag || d.id, local: d.pav || "" };
+              if (!ex) novos.push(alvo);
+              else if (ex.invId !== d.id || ex.nome !== alvo.nome || (!ex.local && alvo.local)) muda.push([ex, alvo]);
+            });
+          else {
+            const nome = `${t.nome} (${ds.length})`;
+            const pavs = [...new Set(ds.map((d) => d.pav).filter(Boolean))];
+            const alvo = { invTipo: tid, tipo: tid, nome, local: pavs.length && pavs.length <= 4 ? pavs.join(", ") : pavs.length ? pavs.length + " pavimentos" : "" };
+            const ex = eqs.find((e) => e.invTipo === tid);
+            if (!ex) novos.push(alvo);
+            else if (ex.nome !== nome) muda.push([ex, alvo]);
+          }
+        }
+        return { total: L.length, semTipo, novos, muda };
+      }
+      function vPuxaInv(c) {
+        if (!S.invCli[c.id]) invDoCliente(c);
+        const ci = S.invCli[c.id];
+        if (!ci || !ci.itens.length) return "";
+        const P = planoPuxa(c);
+        const ab = S.puxaAb;
+        const lista = (l, f) => l.map(f).join("");
+        return `<div class="card"><div class="t" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><span><b class="rd">Inventário</b> <span class="sm">${P.total} dispositivo(s) com tipo do catálogo${P.semTipo ? ` · ${P.semTipo} sem tipo (ligue na aba Catálogo do inventário)` : ""}</span></span>
+  ${P.novos.length || P.muda.length ? `<button class="b s" data-a="puxaVer" style="margin:0">${ab ? "Fechar" : `Puxar do inventário (${P.novos.length} novo(s)${P.muda.length ? ", " + P.muda.length + " a atualizar" : ""})`}</button>` : '<span class="chip ok">em dia com o inventário</span>'}</div>
+  ${
+    ab && (P.novos.length || P.muda.length)
+      ? `<p class="sm" style="margin-top:8px">Tipos com até 3 dispositivos (ou marcados "Todos" no inventário) entram um a um, com a TAG como nome e o pavimento como local. Os outros entram agrupados por tipo. Nada é apagado.</p>
+  ${P.novos.length ? `<b class="sm">Novos</b>${lista(P.novos, (x) => `<div class="sm">+ ${esc(tp(x.tipo).sis)} · ${esc(tp(x.tipo).nome)} — <b>${esc(x.nome)}</b>${x.local ? " · " + esc(x.local) : ""}</div>`)}` : ""}
+  ${P.muda.length ? `<b class="sm">Atualizar</b>${lista(P.muda, ([e, x]) => `<div class="sm">~ ${e.nome === x.nome ? `<b>${esc(x.nome)}</b> (passa a ficar ligado ao inventário)` : `${esc(e.nome || "(sem nome)")} → <b>${esc(x.nome)}</b>`}${x.local && !e.local ? " · local " + esc(x.local) : ""}</div>`)}` : ""}
+  <button class="b" data-a="puxaInv" style="margin-top:8px">Confirmar</button>`
+      : ""
+  }</div>`;
       }
       function vCliEquip(soLocal) {
         const c = S.cli;
@@ -2110,6 +2160,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           try {
             const [docs, cfg] = await Promise.all([DB.list("inventario", fCli(c)), DB.get("inventarioConfig", "geral").catch(() => null)]);
             const mapa = (cfg && cfg.mapa) || {};
+            S.invSel = (cfg && cfg.selecao) || {};
             const itens = [];
             docs.forEach((d) =>
               (d.itens || []).forEach((it) =>
@@ -4564,6 +4615,25 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         },
         vfLimpa() {
           S.vf = { d: "", m: "", a: "" };
+          render();
+        },
+        puxaVer() {
+          S.puxaAb = !S.puxaAb;
+          render();
+        },
+        puxaInv() {
+          const c = S.cli;
+          const P = planoPuxa(c);
+          c.eqs = c.eqs || [];
+          P.muda.forEach(([e, x]) => {
+            Object.assign(e, { nome: x.nome, ...(x.invId ? { invId: x.invId } : {}), ...(x.invTipo ? { invTipo: x.invTipo } : {}) });
+            if (!e.local && x.local) e.local = x.local;
+          });
+          P.novos.forEach((x) => c.eqs.push({ id: uid(), perfil: 0, ...x }));
+          S.puxaAb = false;
+          afterChange("cli.x");
+          if (DB.audit) DB.audit("puxou equipamentos do inventário", "clientes", c.id, `${c.unidade} · ${P.novos.length} novo(s), ${P.muda.length} atualizado(s)`);
+          toast(`${P.novos.length} equipamento(s) incluído(s)${P.muda.length ? `, ${P.muda.length} atualizado(s)` : ""}`);
           render();
         },
         addEq(el) {
