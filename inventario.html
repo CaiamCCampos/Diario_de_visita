@@ -778,6 +778,20 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
    2. BANCO DE DADOS (Firebase ou modo local de teste)
    ================================================================== */
       let DB;
+      // O Firestore não aceita lista dentro de lista (ex.: [["Modelo","NVD3316P"], …]).
+      // Na gravação, cada lista interna vira {a:[…]}; na leitura, volta a ser lista. Vale para os dois modos.
+      const paraFS = (x) =>
+        Array.isArray(x)
+          ? x.map((y) => (Array.isArray(y) ? { a: paraFS(y) } : paraFS(y)))
+          : x && typeof x === "object"
+            ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, paraFS(v)]))
+            : x;
+      const deFS = (x) =>
+        Array.isArray(x)
+          ? x.map((y) => (y && typeof y === "object" && !Array.isArray(y) && Object.keys(y).length === 1 && Array.isArray(y.a) ? deFS(y.a) : deFS(y)))
+          : x && typeof x === "object"
+            ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, deFS(v)]))
+            : x;
       function makeLocalDB() {
         const k = (c) => "inv-local:" + c;
         const read = (c) => {
@@ -794,17 +808,17 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const w = typeof f === "string" ? { [f]: v } : f;
           return Object.entries(w).every(([a, b]) => d[a] === b);
         };
-        const rows = (c, f, v) => Object.values(read(c)).filter((d) => match(d, f, v)).map(clone);
+        const rows = (c, f, v) => Object.values(read(c)).filter((d) => match(d, f, v)).map((d) => deFS(clone(d)));
         const notify = (c) => subs.filter((s) => s.col === c).forEach((s) => s.fire());
         return {
           mode: "local",
           async get(c, id) {
             const d = read(c)[id];
-            return d ? clone(d) : null;
+            return d ? deFS(clone(d)) : null;
           },
           async set(c, id, data) {
             const o = read(c);
-            o[id] = clone(data);
+            o[id] = paraFS(clone(data));
             write(c, o);
             notify(c);
           },
@@ -864,22 +878,22 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           authM,
           async get(c, id) {
             const s = await fsM.getDoc(fsM.doc(db, c, id));
-            return s.exists() ? s.data() : null;
+            return s.exists() ? deFS(s.data()) : null;
           },
           async set(c, id, data) {
-            await fsM.setDoc(fsM.doc(db, c, id), clone(data));
+            await fsM.setDoc(fsM.doc(db, c, id), paraFS(clone(data)));
           },
           async del(c, id) {
             await fsM.deleteDoc(fsM.doc(db, c, id));
           },
           async list(c, f, v) {
             const s = await fsM.getDocs(q(c, f, v));
-            return s.docs.map((d) => d.data());
+            return s.docs.map((d) => deFS(d.data()));
           },
           listen(c, f, v, cb) {
             return fsM.onSnapshot(
               q(c, f, v),
-              (s) => cb(s.docs.map((d) => d.data())),
+              (s) => cb(s.docs.map((d) => deFS(d.data()))),
               (e) => {
                 console.warn("leitura", c, e);
                 toast(e.code === "permission-denied" ? `Sem permissão para ler "${c}". Confira as regras do Firestore.` : "Falha de conexão ao ler " + c);
