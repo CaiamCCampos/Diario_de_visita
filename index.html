@@ -1081,11 +1081,29 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         }
       }
       const gravPend = new Set();
+      // Catálogo: antes de salvar, junta os tipos que foram criados em outro lugar (ex.: pelo inventário)
+      // e que este aparelho ainda não tem, para não apagá-los sem querer. Tipos excluídos aqui não voltam.
+      async function juntaCatalogo(local) {
+        try {
+          const srv = await DB.get("catalogo", "dados");
+          if (srv && Array.isArray(srv.tipos) && Array.isArray(local.tipos)) {
+            const tem = new Set(local.tipos.map((t) => t.id)),
+              del = S.catDel || new Set();
+            srv.tipos.forEach((t) => {
+              if (!tem.has(t.id) && !del.has(t.id)) local.tipos.push(t);
+            });
+          }
+        } catch (e) {
+          console.warn("catálogo: não consegui juntar com o servidor", e);
+        }
+        return local;
+      }
       function gravar(col, id, data) {
         if (!gravando) gravIni = Date.now();
         gravando++;
         showSave();
-        const p = DB.set(col, id, data)
+        const p = (col === "catalogo" ? juntaCatalogo(data) : Promise.resolve(data))
+          .then((d) => DB.set(col, id, d))
           .catch((e) => {
             console.error(e);
             toast("Erro ao salvar: " + (e.code || e.message));
@@ -4652,6 +4670,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (todos.some((c) => (c.eqs || []).some((e) => e.tipo === t.id)))
             return alert("Este tipo está em uso por algum cliente. Troque o tipo dos equipamentos antes de remover.");
           if (!confirm("Remover este tipo?")) return;
+          (S.catDel = S.catDel || new Set()).add(t.id); // não deixa o tipo voltar ao juntar com o servidor
           S.cat.tipos.splice(+el.dataset.i, 1);
           afterChange("cat.x");
           render();

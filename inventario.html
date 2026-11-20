@@ -965,7 +965,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       // técnico: vê, confirma o acesso e corrige login/senha.
       const PERM = {
         admin: ["*"],
-        supervisor: ["inv.editar", "inv.acesso", "inv.confirmar", "inv.alertas", "inv.legenda", "inv.catalogo"],
+        supervisor: ["inv.editar", "inv.acesso", "inv.confirmar", "inv.alertas", "inv.legenda", "inv.catalogo", "inv.criarTipo"],
         tecnico: ["inv.acesso", "inv.confirmar"],
       };
       const pode = (a) => {
@@ -1316,7 +1316,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             for (const it of inv[sis].itens || []) if (!tipoCatDe(sis, it)) (semCat[chaveTipo(sis, it.tipo)] = semCat[chaveTipo(sis, it.tipo)] || []).push(it.id);
           for (const [k, ids] of Object.entries(semCat)) {
             const [sis, tp] = k.split("|");
-            L.push({ chave: `Tipo sem catálogo|${k}`, tipo: "Tipo sem catálogo", sis, ids, tag: tp, texto: `${plural(ids.length)} do tipo "${tp}" sem tipo do catálogo associado. Associe na aba Catálogo ou crie o tipo no Catálogo do diário.` });
+            L.push({ chave: `Tipo sem catálogo|${k}`, tipo: "Tipo sem catálogo", sis, ids, tag: tp, texto: `${plural(ids.length)} do tipo "${tp}" sem tipo do catálogo associado. Na aba Catálogo, associe a um tipo existente ou clique em Criar no catálogo.` });
           }
         }
         const vistosImp = new Set();
@@ -1347,6 +1347,15 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (it.perfil !== undefined && it.perfil !== "") return +it.perfil;
         return +(((S.meta && S.meta.perfilPadrao) || {})[id] || 0);
       };
+      // nome do tipo novo no catálogo: a descrição da Legenda (ex.: DF → Detector de fumaça) ou o nome da planilha
+      const ATV_PADRAO = ["Inspeção visual", "Limpeza do dispositivo", "Reaperto dos conectores e dos fixadores", "Verificação de comunicação com o sistema", "Teste de alimentação"];
+      function nomeNovoTipo(sis, tp) {
+        const leg = ((S.meta && S.meta.legenda) || {})[sis + "|" + tp];
+        if (leg) return leg;
+        const t = txt(tp);
+        if (t.length <= 3) return t.toUpperCase(); // sigla sem legenda: fica a sigla até alguém dar um nome
+        return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+      }
       // sugestão pelo nome (só sugere; quem decide é você ao salvar)
       const palavras = (x) =>
         semAcento(x)
@@ -1796,11 +1805,15 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                   sug = salvo ? "" : sugereTipo(sis, tp),
                   sel = E.mapa[k] !== undefined ? E.mapa[k] : salvo || sug,
                   t = tipoCat(sel);
+                const criar =
+                  !sel && pode("inv.criarTipo")
+                    ? `<div class="row" style="margin-top:6px;align-items:center"><div><input data-novo="${esc(k)}" value="${esc((E.novo || {})[k] ?? nomeNovoTipo(sis, tp))}" placeholder="Nome do tipo novo"></div><div style="flex:0 0 auto;min-width:0"><button class="b s" data-a="criaTipo" data-k="${esc(k)}" style="margin:0">Criar no catálogo</button></div></div>${txt(tp).length <= 3 && !((S.meta && S.meta.legenda) || {})[sis + "|" + tp] ? '<div class="sm">É uma sigla: troque pelo nome completo (ex.: Detector de fumaça) antes de criar.</div>' : ""}`
+                    : "";
                 const nota = E.mapa[k] !== undefined && E.mapa[k] !== salvo ? '<div class="sm am">alterado, falta salvar</div>' : !salvo && sug ? '<div class="sm" style="color:var(--warn)">sugestão: confira e salve</div>' : !salvo ? '<div class="sm rd">sem catálogo</div>' : "";
                 const selecao = t ? (E.selecao[t.id] !== undefined ? E.selecao[t.id] : selecaoDe(t.id)) : "";
                 const pf = t ? (E.pp[t.id] !== undefined ? E.pp[t.id] : +(pp[t.id] || 0)) : 0;
                 return `<tr class="it" style="cursor:default"><td data-l="Tipo na planilha"><b>${esc(tp)}</b> <span class="sm">(${q})</span></td>
-  <td data-l="Tipo no catálogo"><select data-map="${esc(k)}"${ed ? "" : " disabled"}><option value="">— sem catálogo —</option>${tipos.map((x) => `<option value="${esc(x.id)}"${x.id === sel ? " selected" : ""}>${esc(x.nome)}</option>`).join("")}</select>${nota}</td>
+  <td data-l="Tipo no catálogo"><select data-map="${esc(k)}"${ed ? "" : " disabled"}><option value="">— sem catálogo —</option>${tipos.map((x) => `<option value="${esc(x.id)}"${x.id === sel ? " selected" : ""}>${esc(x.nome)}</option>`).join("")}</select>${nota}${criar}</td>
   <td data-l="Na preventiva">${t ? `<select data-selecao="${esc(t.id)}"${ed ? "" : " disabled"}><option value="todos"${selecao === "todos" ? " selected" : ""}>Todos (já marcados)</option><option value="escolher"${selecao === "escolher" ? " selected" : ""}>Escolher quais</option></select>` : "—"}</td>
   <td data-l="Perfil neste cliente">${t ? ((t.perfis || []).length > 1 ? `<select data-pp="${esc(t.id)}"${ed ? "" : " disabled"}>${t.perfis.map((p, i) => `<option value="${i}"${i === pf ? " selected" : ""}>${esc(p.nome)}</option>`).join("")}</select>` : esc(((t.perfis || [])[0] || {}).nome || "Padrão")) : "—"}</td></tr>`;
               })
@@ -1808,7 +1821,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             return `<div class="card"><h2>${esc(sis)}${sisCat(sis) !== sis ? ` · no catálogo: ${esc(sisCat(sis))}` : ""}</h2><div class="tblw"><table class="tbl"><thead><tr><th>Tipo na planilha</th><th>Tipo no catálogo</th><th>Na visita preventiva</th><th>Perfil neste cliente</th></tr></thead><tbody>${linhas}</tbody></table></div></div>`;
           })
           .join("");
-        return `<div class="note" style="background:#f6f6f7">Ligue cada tipo que veio da planilha a um tipo do <b>Catálogo do diário</b>: é de lá que vêm as atividades da preventiva. A ligação vale para <b>todos os clientes</b> (a próxima planilha já entra ligada); o perfil vale só para este cliente. Tipo que não existe no catálogo: crie no Catálogo do diário e volte aqui.${ed ? "" : " Só supervisor e administrador alteram."}</div>
+        const semLig = SISTEMAS.filter((s) => S.inv[s]).flatMap((sis) =>
+          [...new Set((S.inv[sis].itens || []).map((it) => it.tipo))].filter((tp) => {
+            const k = chaveTipo(sis, tp);
+            return !(E.mapa[k] !== undefined ? E.mapa[k] : mapa[k] || sugereTipo(sis, tp));
+          }).map((tp) => chaveTipo(sis, tp)),
+        );
+        const topo = semLig.length && pode("inv.criarTipo") ? `<div class="top" style="margin:8px 0"><span class="sm">${semLig.length} tipo${semLig.length > 1 ? "s" : ""} sem ligação e sem sugestão</span><button class="b" data-a="criaTodos" style="margin:0">Criar no catálogo todos os que faltam (${semLig.length})</button></div>` : "";
+        return `${topo}<div class="note" style="background:#f6f6f7">Ligue cada tipo que veio da planilha a um tipo do <b>Catálogo do diário</b>: é de lá que vêm as atividades da preventiva. A ligação vale para <b>todos os clientes</b> (a próxima planilha já entra ligada); o perfil vale só para este cliente. Tipo que não existe no catálogo: clique em <b>Criar no catálogo</b> (o nome vem da Legenda ou da planilha; o tipo nasce com o perfil Padrão e atividades básicas, que você ajusta depois no Catálogo do diário).${ed ? "" : " Só supervisor e administrador alteram."}</div>
   ${blocos}${ed ? '<button class="b" data-a="salvaCat" style="width:100%">Salvar ligações com o catálogo</button>' : ""}<button class="b o" data-a="diarioCat" style="width:100%">Abrir o Catálogo no diário</button>`;
       }
 
@@ -2113,6 +2133,15 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           toast("Ligações com o catálogo salvas");
           render();
         },
+        async criaTipo(el) {
+          await criaTipos([el.dataset.k]);
+        },
+        async criaTodos() {
+          const ks = [...document.querySelectorAll("[data-novo]")].map((x) => x.dataset.novo);
+          if (!ks.length) return;
+          if (!confirm(`Criar ${ks.length} tipo${ks.length > 1 ? "s" : ""} novo${ks.length > 1 ? "s" : ""} no Catálogo do diário, com os nomes que estão nos campos?`)) return;
+          await criaTipos(ks);
+        },
         diarioCat() {
           location.href = "index.html";
         },
@@ -2327,6 +2356,56 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         },
       };
 
+      /* cria tipos novos no Catálogo do diário e já liga os tipos da planilha a eles */
+      async function criaTipos(chaves) {
+        const nomes = {};
+        for (const k of chaves) {
+          const el = document.querySelector(`[data-novo="${CSS.escape(k)}"]`);
+          const n = txt(el ? el.value : "");
+          if (!n) return toast("Preencha o nome do tipo novo");
+          nomes[k] = n;
+        }
+        try {
+          const cat = (await DB.get("catalogo", "dados")) || { id: "dados", sis: [], tipos: [] }; // lê o mais recente antes de gravar
+          cat.tipos = cat.tipos || [];
+          const cfg = clone(S.icfg || { id: "geral" });
+          cfg.id = "geral";
+          cfg.mapa = cfg.mapa || {};
+          let novos = 0,
+            ligados = 0;
+          for (const [k, nome] of Object.entries(nomes)) {
+            const sis = k.split("|")[0],
+              sigla = sisCat(sis);
+            const igual = cat.tipos.find((t) => t.sis === sigla && semAcento(t.nome).toUpperCase() === semAcento(nome).toUpperCase());
+            let id;
+            if (igual) id = igual.id;
+            else {
+              id = uid();
+              cat.tipos.push({ id, sis: sigla, nome, extra: /^NVR\b/i.test(nome) ? "dias" : "", perfis: [{ nome: "Padrão", atv: ATV_PADRAO.slice() }], criadoPor: "inventário", criadoEm: agora() });
+              novos++;
+            }
+            cfg.mapa[k] = id;
+            ligados++;
+          }
+          if (novos && !(await grava("catalogo", "dados", cat))) return;
+          cfg.atualizadoEm = agora();
+          cfg.atualizadoPor = meuNome();
+          if (!(await grava("inventarioConfig", "geral", cfg))) return;
+          S.cat = cat;
+          S.icfg = cfg;
+          chaves.forEach((k) => {
+            if (S.catEd && S.catEd.mapa) delete S.catEd.mapa[k];
+          });
+          audita("criou tipos no catálogo", "catalogo", "dados", `${cliNome(S.cliId)} · ${Object.values(nomes).join(", ")}`.slice(0, 300));
+          await salvaMeta();
+          toast(`${novos} tipo${novos === 1 ? "" : "s"} criado${novos === 1 ? "" : "s"} no catálogo · ${ligados} ligado${ligados === 1 ? "" : "s"}`);
+          render();
+        } catch (e) {
+          console.error(e);
+          toast(e.code === "permission-denied" ? "Sem permissão para alterar o Catálogo (regras do Firestore)." : "Não consegui criar: " + (e.code || e.message));
+        }
+      }
+
       /* exportação simples para Excel (uma aba por sistema). A planilha completa com painel vem na próxima etapa. */
       function exportaExcel() {
         if (typeof XLSX === "undefined") return toast("A biblioteca do Excel não carregou. Confira a internet.");
@@ -2420,6 +2499,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       }, true);
       let tBusca = null;
       document.addEventListener("input", (ev) => {
+        if (ev.target.dataset && ev.target.dataset.novo !== undefined) {
+          S.catEd = S.catEd || { mapa: {}, selecao: {}, pp: {} };
+          (S.catEd.novo = S.catEd.novo || {})[ev.target.dataset.novo] = ev.target.value;
+          return;
+        }
         const f = ev.target.dataset && ev.target.dataset.f;
         if (f === "busca" || f === "fBusca") {
           S[f] = ev.target.value;
