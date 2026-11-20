@@ -2127,7 +2127,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         return { inp, sit };
       }
       // quadros de distribuição: dispositivos do tipo QUADRO…; os outros dizem de qual quadro recebem rede (campo quadro = TAG do quadro)
-      const ehQuadroD = (d) => /QUADRO/i.test(semAc(d && d.tipo));
+      const ehQuadroD = (d) => /QUADRO|SWITCH/i.test(semAc(d && d.tipo));
       const nQ = (x) => semAc(x || "").toUpperCase().trim();
       const ligadosD = (L, q) => L.filter((d) => d.quadro && nQ(d.quadro) === nQ(q.tag) && d.id !== q.id);
       const SEM_REDE_D = ["OFFLINE", "FALHA"];

@@ -1091,7 +1091,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       };
       /* ---- quadros de distribuição (infraestrutura de rede): são dispositivos do tipo QUADRO…;
          cada dispositivo pode dizer de qual quadro recebe rede (campo quadro = TAG do quadro) ---- */
-      const ehQuadro = (it) => /QUADRO/i.test(semAcento(it && it.tipo));
+      const ehQuadro = (it) => /QUADRO|SWITCH/i.test(semAcento(it && it.tipo)); // quadro de distribuição ou o switch PoE dele
       const nomeQ = (x) => semAcento(x || "").toUpperCase().trim();
       const quadrosDe = (inv) => Object.entries(inv).flatMap(([sis, d]) => ((d && d.itens) || []).filter(ehQuadro).map((it) => ({ sis, it })));
       const quadroDoItem = (inv, it) => (it && it.quadro ? quadrosDe(inv).find((q) => nomeQ(q.it.tag) === nomeQ(it.quadro)) : null);
@@ -1880,7 +1880,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       function vNovo() {
         const N = S.novo,
           sis = N.sis;
-        const tipos = [...new Set([...((S.inv[sis] && S.inv[sis].itens) || []).map((i) => i.tipo).filter(Boolean), "QUADRO DE DISTRIBUIÇÃO"])].sort();
+        const tipos = [...new Set([...((S.inv[sis] && S.inv[sis].itens) || []).map((i) => i.tipo).filter(Boolean), "QUADRO DE DISTRIBUIÇÃO", "SWITCH POE"])].sort();
         const ext = sis ? (EXTRAS[sis] || []) : [];
         const inp = (k, rot, o = {}) => `<div><label>${esc(rot)}</label><input id="n_${k}" value="${esc(N[k] || "")}"${o.list ? ` list="${o.list}"` : ""}${o.ph ? ` placeholder="${esc(o.ph)}"` : ""} autocomplete="off"></div>`;
         return `<div class="card" style="border:2px solid var(--p)"><h2>Novo dispositivo</h2>
