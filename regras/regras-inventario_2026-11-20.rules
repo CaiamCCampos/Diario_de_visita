@@ -1,3 +1,6 @@
+    // Arquivo: regras-inventario_2026-11-20.rules
+    // Criado em: 20/11/2026 · publicado no Firebase em 20/11/2026
+    // Conteúdo: bloco das coleções inventario, inventarioAcessos e inventarioMeta (página inventario.html)
     // ================= INVENTÁRIO (inventario.html) =================
     // Cole este bloco DENTRO de "match /databases/{database}/documents { ... }" das regras atuais
     // (Console do Firebase > Firestore > Regras), sem apagar o que já existe, e clique em Publicar.
