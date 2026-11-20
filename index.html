@@ -921,13 +921,32 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         ]);
         const app = appM.initializeApp(FBCFG);
         // App Check (opcional): só liga se o config.js tiver a chave do reCAPTCHA (window.FIREBASE_APPCHECK_KEY)
+        // App Check: a primeira leitura só sai depois do "atestado" do aparelho (senão o Firebase recusa com permission-denied)
+        let renovaAC = async () => {};
         if (window.FIREBASE_APPCHECK_KEY) {
           try {
             const acM = await import(base + "firebase-app-check.js");
             if (location.hostname === "localhost" || location.hostname === "127.0.0.1") self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-            acM.initializeAppCheck(app, { provider: window.FIREBASE_APPCHECK_TIPO === "enterprise" ? new acM.ReCaptchaEnterpriseProvider(window.FIREBASE_APPCHECK_KEY) : new acM.ReCaptchaV3Provider(window.FIREBASE_APPCHECK_KEY), isTokenAutoRefreshEnabled: true });
+            const ac = acM.initializeAppCheck(app, { provider: window.FIREBASE_APPCHECK_TIPO === "enterprise" ? new acM.ReCaptchaEnterpriseProvider(window.FIREBASE_APPCHECK_KEY) : new acM.ReCaptchaV3Provider(window.FIREBASE_APPCHECK_KEY), isTokenAutoRefreshEnabled: true });
+            renovaAC = (forcar) => Promise.race([acM.getToken(ac, !!forcar), new Promise((r) => setTimeout(r, 8000))]).catch((e) => console.warn("App Check", e));
+            await renovaAC(false);
           } catch (e) {
             console.warn("App Check não iniciou", e);
+          }
+        }
+        // falha passageira (atestado vencido, rede oscilando): tenta de novo antes de mostrar erro
+        const PASSAGEIRO = ["permission-denied", "unavailable", "unauthenticated", "deadline-exceeded", "sem resposta da rede"];
+        const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+        async function tenta(fn) {
+          for (let i = 0; ; i++) {
+            try {
+              return await fn();
+            } catch (e) {
+              if (i >= 2 || !PASSAGEIRO.includes(e.code)) throw e;
+              console.warn("tentando de novo", e.code);
+              if (e.code === "permission-denied") await renovaAC(true);
+              await espera(1200 * (i + 1));
+            }
           }
         }
         let db;
@@ -980,25 +999,49 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             }
           },
           async get(c, id) {
-            const s = await comLimite(fsM.getDoc(fsM.doc(db, c, id)));
+            const s = await tenta(() => comLimite(fsM.getDoc(fsM.doc(db, c, id))));
             return s.exists() ? s.data() : null;
           },
           async set(c, id, data) {
-            await fsM.setDoc(fsM.doc(db, c, id), clone(data));
+            const d = clone(data);
+            await tenta(() => fsM.setDoc(fsM.doc(db, c, id), d));
           },
           async del(c, id) {
             await fsM.deleteDoc(fsM.doc(db, c, id));
           },
           async list(c, f, v) {
-            const s = await comLimite(fsM.getDocs(q(c, f, v)));
+            const s = await tenta(() => comLimite(fsM.getDocs(q(c, f, v))));
             return s.docs.map((d) => d.data());
           },
+          // atualização em tempo real que cai por falha passageira é reaberta sozinha
           listen(c, f, v, cb) {
-            return fsM.onSnapshot(
-              q(c, f, v),
-              (s) => cb(s.docs.map((d) => d.data())),
-              (e) => avisaRede(c, e),
-            );
+            let un = null,
+              parado = false,
+              falhas = 0;
+            const abre = () => {
+              un = fsM.onSnapshot(
+                q(c, f, v),
+                (s) => {
+                  falhas = 0;
+                  cb(s.docs.map((d) => d.data()));
+                },
+                async (e) => {
+                  if (parado) return;
+                  if (PASSAGEIRO.includes(e.code) && falhas < 6) {
+                    falhas++;
+                    console.warn("reabrindo " + c, e.code);
+                    if (e.code === "permission-denied") await renovaAC(true);
+                    await espera(1500 * falhas);
+                    if (!parado) abre();
+                  } else avisaRede(c, e);
+                },
+              );
+            };
+            abre();
+            return () => {
+              parado = true;
+              if (un) un();
+            };
           },
         };
       }

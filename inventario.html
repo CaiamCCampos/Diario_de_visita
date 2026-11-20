@@ -848,18 +848,35 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const base = "https://www.gstatic.com/firebasejs/10.13.2/";
         const [appM, fsM, authM] = await Promise.all([import(base + "firebase-app.js"), import(base + "firebase-firestore.js"), import(base + "firebase-auth.js")]);
         const app = appM.initializeApp(FBCFG);
+        let renovaAC = async () => {};
         if (window.FIREBASE_APPCHECK_KEY) {
           try {
             const acM = await import(base + "firebase-app-check.js");
-            acM.initializeAppCheck(app, {
+            const ac = acM.initializeAppCheck(app, {
               provider:
                 window.FIREBASE_APPCHECK_TIPO === "enterprise"
                   ? new acM.ReCaptchaEnterpriseProvider(window.FIREBASE_APPCHECK_KEY)
                   : new acM.ReCaptchaV3Provider(window.FIREBASE_APPCHECK_KEY),
               isTokenAutoRefreshEnabled: true,
             });
+            renovaAC = (forcar) => Promise.race([acM.getToken(ac, !!forcar), new Promise((r) => setTimeout(r, 8000))]).catch((e) => console.warn("App Check", e));
+            await renovaAC(false); // primeira leitura só depois do "atestado" do aparelho
           } catch (e) {
             console.warn("App Check não iniciou", e);
+          }
+        }
+        const PASSAGEIRO = ["permission-denied", "unavailable", "unauthenticated", "deadline-exceeded"];
+        const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+        // falha passageira (atestado vencido, rede oscilando): tenta de novo antes de mostrar erro
+        async function tenta(fn) {
+          for (let i = 0; ; i++) {
+            try {
+              return await fn();
+            } catch (e) {
+              if (i >= 2 || !PASSAGEIRO.includes(e.code)) throw e;
+              if (e.code === "permission-denied") await renovaAC(true);
+              await espera(1200 * (i + 1));
+            }
           }
         }
         let db;
@@ -879,28 +896,52 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           auth,
           authM,
           async get(c, id) {
-            const s = await fsM.getDoc(fsM.doc(db, c, id));
+            const s = await tenta(() => fsM.getDoc(fsM.doc(db, c, id)));
             return s.exists() ? deFS(s.data()) : null;
           },
           async set(c, id, data) {
-            await fsM.setDoc(fsM.doc(db, c, id), paraFS(clone(data)));
+            const d = paraFS(clone(data));
+            await tenta(() => fsM.setDoc(fsM.doc(db, c, id), d));
           },
           async del(c, id) {
             await fsM.deleteDoc(fsM.doc(db, c, id));
           },
           async list(c, f, v) {
-            const s = await fsM.getDocs(q(c, f, v));
+            const s = await tenta(() => fsM.getDocs(q(c, f, v)));
             return s.docs.map((d) => deFS(d.data()));
           },
+          // atualização em tempo real que cai por falha passageira é reaberta sozinha
           listen(c, f, v, cb) {
-            return fsM.onSnapshot(
-              q(c, f, v),
-              (s) => cb(s.docs.map((d) => deFS(d.data()))),
-              (e) => {
-                console.warn("leitura", c, e);
-                toast(e.code === "permission-denied" ? `Sem permissão para ler "${c}". Confira as regras do Firestore.` : "Falha de conexão ao ler " + c);
-              },
-            );
+            let un = null,
+              parado = false,
+              falhas = 0;
+            const abre = () => {
+              un = fsM.onSnapshot(
+                q(c, f, v),
+                (s) => {
+                  falhas = 0;
+                  cb(s.docs.map((d) => deFS(d.data())));
+                },
+                async (e) => {
+                  if (parado) return;
+                  if (PASSAGEIRO.includes(e.code) && falhas < 6) {
+                    falhas++;
+                    console.warn("reabrindo", c, e.code);
+                    if (e.code === "permission-denied") await renovaAC(true);
+                    await espera(1500 * falhas);
+                    if (!parado) abre();
+                    return;
+                  }
+                  console.warn("leitura", c, e);
+                  toast(e.code === "permission-denied" ? `Sem permissão para ler "${c}". Confira as regras do Firestore.` : "Falha de conexão ao ler " + c);
+                },
+              );
+            };
+            abre();
+            return () => {
+              parado = true;
+              if (un) un();
+            };
           },
         };
       }
