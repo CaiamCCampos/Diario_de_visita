@@ -2204,7 +2204,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
     <div class="sm" style="margin:6px 0">Aberta${p.criadaPorNome ? " por " + esc(p.criadaPorNome) : ""} em ${bd(p.criada)}${p.status ? " · " + esc(p.status) : ""}${p.dispId ? ` · Dispositivo: <b>${esc(p.dispTag || p.dispId)}</b>${p.dispStatus ? ` (${esc(p.dispStatus)})` : ""}` : ""}</div>
     ${full ? "" : '<p class="sm">Você pode preencher ações executadas, solução proposta, observação técnica e texto livre, e concluir. O restante só quem abriu, o supervisor e o admin alteram.</p>'}
     ${itemFields(`pc.${i}`, false, !full, c)}
-    ${(p.historico || []).length ? `<details class="hist"><summary>Histórico de alterações (${p.historico.length})</summary>${[...p.historico].sort((x, y) => (x.ts || 0) - (y.ts || 0) || String(x.data || "").localeCompare(String(y.data || ""))).map((h) => `<div class="hl"><b>${bd(h.data)}${h.hora ? " " + esc(h.hora) : ""}</b> · ${esc(h.status || "")}${h.por ? " · " + esc(h.por) : ""}${(h.alt || []).map((a) => `<div class="sm hlc"><i>${esc(a.c)}:</i> ${a.de ? "<s>" + esc(a.de) + "</s> para " : ""}${esc(a.para) || "(vazio)"}</div>`).join("")}</div>`).join("")}</details>` : ""}
+    ${(p.historico || []).length ? `<details class="hist"><summary>Histórico de alterações (${p.historico.length})</summary>${[...p.historico].sort((x, y) => (x.ts || 0) - (y.ts || 0) || String(x.data || "").localeCompare(String(y.data || ""))).map((h) => `<div class="hl"><b>${bd(h.data)}${h.hora ? " " + esc(h.hora) : ""}</b> · ${esc(h.status || "")}${h.por ? " · " + esc(h.por) : ""}${(h.alt || []).map((a) => `<div class="sm hlc"><i>${esc(a.c)}:</i> ${a.de ? "<s>" + esc(legHist(a.c, a.de)) + "</s> para " : ""}${esc(legHist(a.c, a.para)) || "(vazio)"}</div>`).join("")}</div>`).join("")}</details>` : ""}
     ${p.aberta ? `<button class="b s" data-a="pcClose" data-i="${i}">Concluir</button>` : full ? `<button class="b o s" data-a="pcReopen" data-i="${i}">Reabrir</button>` : ""}${full ? ` <button class="b o s" data-a="pcDel" data-i="${i}">Excluir</button>` : ""}</details>`;
         };
         // segunda camada: se houver mais de uma pendência do mesmo tipo de equipamento, elas ficam num menu do tipo
@@ -4024,10 +4024,21 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       }
       const CAMPOS_PEND = [["titulo","Equipamento / assunto"],["tipoId","Tipo"],["eqId","Equipamento do cliente"],["problema","Problema reportado"],["diag","Diagnóstico"],["acoes","Ações executadas"],["solucao","Solução proposta"],["obs","Observação técnica"],["texto","Texto livre"],["status","Status"],["dispTag","Dispositivo do inventário"],["dispStatus","Situação do dispositivo"]];
       const vTxt = (v) => (Array.isArray(v) ? v.join("; ") : v == null ? "" : String(v)).trim();
+      // no histórico, tipo e equipamento aparecem pelo nome (não pelo código interno)
+      const nomeTipo = (id) => {
+        const t = id && ((S.cat && S.cat.tipos) || []).find((x) => x.id === id);
+        return t ? `${t.sis} · ${t.nome}` : id || "";
+      };
+      const nomeEqId = (id) => {
+        const e = id && [...((S.cli && S.cli.eqs) || []), ...((S.vcli && S.vcli.eqs) || [])].find((x) => x.id === id);
+        return e ? nmEq(e) : id || "";
+      };
+      const legHist = (c, v) => (c === "Tipo" ? nomeTipo(v) : c === "Equipamento do cliente" ? nomeEqId(v) : v);
       const difPend = (a, b) => {
         const r = [];
         CAMPOS_PEND.forEach(([k, n]) => {
-          const x = vTxt(a && a[k]), y = vTxt(b && b[k]);
+          const f = k === "tipoId" ? nomeTipo : k === "eqId" ? nomeEqId : (z) => z;
+          const x = vTxt(f(a && a[k])), y = vTxt(f(b && b[k]));
           if (x !== y) r.push({ c: n, de: x.slice(0, 160), para: y.slice(0, 160) });
         });
         return r;
