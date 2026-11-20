@@ -2043,7 +2043,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   ${ids.length ? `<div class="ids sm">${p.dispId ? "Dispositivo" : "TAG citada"}: ${ids.map((id) => `<a data-a="vaiItem" data-id="${esc(id)}">${esc(id)}</a>`).join("")}${p.dispId && p.dispTag ? " " + esc(p.dispTag) : ""}${p.dispId && p.dispStatus ? ` · situação marcada: <span class="st ${esc(p.dispStatus)}">${esc(p.dispStatus)}</span>` : ""}</div>` : '<div class="sm" style="color:var(--d)">Sem dispositivo ligado. No diário, escolha o dispositivo na pendência (campo "Dispositivo do inventário").</div>'}</div>`;
         };
         return `<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
-  <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Elas são criadas e concluídas no diário; aqui você acompanha e vê o dispositivo ligado.</div>
+  <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Elas são criadas e concluídas no diário; aqui você acompanha e vê o dispositivo ligado. Dispositivo que fica OFFLINE no inventário abre uma pendência no diário automaticamente.</div>
+  ${(() => {
+    const semP = Object.values(S.inv).flatMap((d) => d.itens || []).filter((it) => it.status === "OFFLINE" && !pendDoItem(it.id).some((p) => p.aberta)).length;
+    return semP && pode("inv.editar") ? `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="sm" style="flex:1 1 240px"><b>${semP}</b> ${semP === 1 ? "dispositivo OFFLINE está" : "dispositivos OFFLINE estão"} sem pendência aberta no diário.</span><button class="b s" data-a="pendOffline" style="margin:0">Abrir pendências dos OFFLINE</button></div>` : "";
+  })()}
   <div class="filtros"><div><label>Mostrar</label><select data-f="fPend"><option value="aberta"${f === "aberta" ? " selected" : ""}>Em aberto</option><option value="concluida"${f === "concluida" ? " selected" : ""}>Concluídas</option><option value="todas"${f === "todas" ? " selected" : ""}>Todas</option></select></div></div>
   ${lista.map(card).join("") || '<div class="card"><p class="sm">Nenhuma pendência.</p></div>'}`;
       }
@@ -2139,6 +2143,60 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         S.meta = m;
         return grava("inventarioMeta", m.id, m);
       }
+      /* ---- dispositivo OFFLINE vira pendência no diário ----
+         uma pendência aberta por dispositivo; só o básico (dispositivo, tipo, problema). Ações, diagnóstico e solução
+         ficam em branco para quem for atender preencher no diário. */
+      async function abrePendOffline(cli, inv) {
+        const off = [];
+        for (const [sis, d] of Object.entries(inv)) for (const it of (d && d.itens) || []) if (it.status === "OFFLINE") off.push([sis, it]);
+        if (!off.length) return 0;
+        const f = cli.equipeId ? { clienteId: cli.id, equipeId: cli.equipeId } : { clienteId: cli.id };
+        const abertas = (await DB.list("pendencias", f)).filter((p) => p.aberta);
+        const ja = new Set(abertas.map((p) => p.dispId).filter(Boolean));
+        const jaTag = new Set(abertas.filter((p) => !p.dispId).map((p) => semAcento(p.titulo || "").toUpperCase().trim()).filter(Boolean));
+        const d0 = new Date(),
+          hora = `${pad(d0.getHours())}:${pad(d0.getMinutes())}`;
+        let n = 0;
+        for (const [sis, it] of off) {
+          if (ja.has(it.id) || (it.tag && jaTag.has(semAcento(it.tag).toUpperCase().trim()))) continue;
+          const tId = tipoCatDe(sis, it),
+            t = tipoCat(tId);
+          const id = uid();
+          await DB.set("pendencias", id, {
+            id,
+            clienteId: cli.id,
+            equipeId: cli.equipeId || "",
+            criadaPorId: (S.user && S.user.uid) || "",
+            criadaPorNome: meuNome(),
+            criada: hoje(),
+            origem: "inventário",
+            titulo: it.tag || it.id,
+            tipoId: t ? tId : "",
+            sis: t ? t.sis : sisCat(sis),
+            eqId: "",
+            problema: `Dispositivo OFFLINE no inventário${it.nvr ? ` (${it.nvr}${it.canal ? " canal " + it.canal : ""})` : ""}${it.ip ? " · IP " + it.ip : ""}`,
+            diag: "",
+            acoes: [],
+            solucao: "",
+            obs: "",
+            texto: "",
+            status: "",
+            aberta: true,
+            dispId: it.id,
+            dispSis: sis,
+            dispTag: it.tag || "",
+            dispIp: it.ip || "",
+            dispPav: it.pav || "",
+            dispStatus: "OFFLINE",
+            dispAplicado: `${it.id}|OFFLINE`,
+            historico: [{ data: hoje(), hora, ts: Date.now(), status: "Aberta", por: meuNome() + " (inventário: dispositivo OFFLINE)" }],
+          });
+          ja.add(it.id);
+          n++;
+        }
+        if (n) audita("abriu pendências de dispositivos offline", "pendencias", cli.id, `${cli.unidade || ""} · ${n} pendência(s)`);
+        return n;
+      }
       async function salvaSistema(sis, aces) {
         const doc = clone(S.inv[sis]);
         doc.atualizadoEm = agora();
@@ -2224,6 +2282,17 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             if (x) x.value = v;
           });
         },
+        async pendOffline(el) {
+          el.disabled = true;
+          try {
+            const n = await abrePendOffline(S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId }, S.inv);
+            toast(n ? `${n} pendência(s) aberta(s) no diário` : "Nenhuma pendência nova (todos já têm pendência aberta)");
+          } catch (e) {
+            console.error(e);
+            toast("Não consegui abrir as pendências: " + (e.code === "permission-denied" ? "sem permissão" : e.code || e.message));
+          }
+          el.disabled = false;
+        },
         async salvaItem() {
           const sis = S.aba,
             it = itemAtual();
@@ -2266,7 +2335,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           S.inv[sis] = doc;
           if (await salvaSistema(sis, mudouAc)) {
             if (mudouAc) audita("alterou senha", "inventarioAcessos", doc.id, `${cliNome(S.cliId)} · ${sis} · ${it.id}`);
-            toast("Dispositivo salvo");
+            let nPend = 0;
+            if (n.status === "OFFLINE" && stAntes !== "OFFLINE") nPend = await abrePendOffline(S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId }, { [sis]: { itens: [n] } }).catch((e) => (console.warn(e), 0));
+            toast(nPend ? "Dispositivo salvo · pendência aberta no diário" : "Dispositivo salvo");
           }
         },
         async salvaCat() {
@@ -2499,7 +2570,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             meta.resumo = resumo(novoInv, meta, novoAces);
             await DB.set("inventarioMeta", cli.id, meta);
             audita("importou inventário", "inventarioMeta", cli.id, `${cli.unidade} · v${meta.versao} · ${I.nome} · ${meta.resumo.total} dispositivos`);
-            toast(`Inventário salvo: ${meta.resumo.total} dispositivos (v${meta.versao})`);
+            let nPend = 0;
+            try {
+              nPend = await abrePendOffline(cli, novoInv);
+            } catch (e) {
+              console.warn(e);
+              toast("Inventário salvo, mas não consegui abrir as pendências dos offline: " + (e.code || e.message));
+            }
+            toast(`Inventário salvo: ${meta.resumo.total} dispositivos (v${meta.versao})${nPend ? ` · ${nPend} pendência(s) aberta(s) no diário para os OFFLINE` : ""}`);
             S.imp = { cliId: "", nome: "", res: null, erro: "", salvando: false };
             abreCliente(cli.id);
           } catch (e) {
