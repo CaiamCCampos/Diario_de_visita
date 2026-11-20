@@ -711,6 +711,15 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   .tbl tr.it td.c-tag{font-weight:700;color:var(--r)}
   .tbl tr.det{border:1px solid var(--r);border-radius:8px;margin:-6px 0 10px}
   .tbl tr.det > td{border:0}
+  .tbl tr.it td.vazio{display:none}
+}
+/* celular: quadros de resumo menores (3 por linha), para a lista aparecer logo */
+@media (max-width:600px){
+  .kpis{grid-template-columns:repeat(3,1fr);gap:6px}
+  .kpi{padding:6px 7px}
+  .kpi .n{font-size:18px}
+  .kpi .r{font-size:10.5px;line-height:1.2}
+  .tabs button{padding:9px 10px}
 }
 </style>
   </head>
@@ -1704,7 +1713,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 }
                 if (k === "id" && comAl.has(it.id)) v += '<span class="tag-al">alerta</span>';
                 if (k === "ip" || k === "id") v = `<span class="mono">${v}</span>`;
-                return `<td data-l="${esc(ROT[k])}"${k === "tag" ? ' class="c-tag"' : ""}>${v}</td>`;
+                const cls = [k === "tag" ? "c-tag" : "", !it[k] && k !== "status" ? "vazio" : ""].filter(Boolean).join(" ");
+                return `<td data-l="${esc(ROT[k])}"${cls ? ` class="${cls}"` : ""}>${v}</td>`;
               })
               .join("");
             const ver = it.verificado
