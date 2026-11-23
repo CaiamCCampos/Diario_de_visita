@@ -2422,7 +2422,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const P = problemas().slice().sort((a, b) => (a.status === "resolvido") - (b.status === "resolvido") || String(b.criadoEm || "").localeCompare(String(a.criadoEm || "")));
         const dias = (iso) => (iso ? Math.max(0, Math.round((new Date(hoje()) - new Date(String(iso).slice(0, 10))) / 864e5)) : 0);
         // quadros sem rede que ainda não têm problema: sugere criar
-        const sug = quadrosDe(S.inv).filter((q) => SEM_REDE.includes(q.it.status) && !P.some((x) => x.status !== "resolvido" && x.localId === q.it.id));
+        // quadro já coberto: é o local de um problema em aberto OU tem pendência em aberto ligada a um problema em aberto
+        const probAb = new Set(P.filter((x) => x.status !== "resolvido").map((x) => x.id));
+        const sug = quadrosDe(S.inv).filter((q) => SEM_REDE.includes(q.it.status) && !P.some((x) => x.status !== "resolvido" && x.localId === q.it.id) && !(S.pend || []).some((p) => p.aberta && !p.desconsiderada && p.dispId === q.it.id && probAb.has(p.problemaId)));
         const N = S.novoProb;
         const form = N
           ? `<div class="card" style="border:2px solid var(--p)"><h2>${N.id ? "Editar problema" : "Novo problema"}</h2>
