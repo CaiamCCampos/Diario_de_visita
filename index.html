@@ -2524,7 +2524,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                   `<div class="eq">${fChk(`visit.ver.${e.id}.off`, `<b>${esc(e.nome)}</b> <small>${esc(e.local)}</small>`, { inv: true, r: true })}` +
                   (st.off
                     ? ""
-                    : atvDe(e)
+                    : selInvBloco(e, st) +
+                      atvDe(e)
                         .map((a, k) => fChk(`visit.ver.${e.id}.no.${k}`, esc(a), { inv: true }))
                         .join("") +
                       (t.extra === "dias"
@@ -2545,6 +2546,69 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           );
         }
         return h;
+      }
+
+      /* ---- preventiva em parte de um grupo do inventário ("Câmeras fixas (80)"):
+         o técnico marca em quais dispositivos fez a preventiva; todos recebem as mesmas atividades.
+         Fica em visit.ver[eqId].sel = [ids do inventário]. Vazio = ainda não escolhidos (relatório sai só com o grupo). */
+      function dispsDoGrupo(c, e) {
+        return invDoCliente(c)
+          .filter((d) => d.tipoCat === e.invTipo && d.status !== "VAZIO")
+          .sort((a, b) => String(a.pav).localeCompare(String(b.pav), "pt") || String(a.tag).localeCompare(String(b.tag), "pt", { numeric: true }));
+      }
+      function selInvBloco(e, st) {
+        if (!e.invTipo) return "";
+        const c = S.vcli;
+        const ds = dispsDoGrupo(c, e);
+        const ci = S.invCli[c.id];
+        if (!ds.length) return ci && ci.ok ? "" : '<p class="sm">Carregando os dispositivos do inventário…</p>';
+        const sel = new Set(st.sel || []);
+        const n = ds.filter((d) => sel.has(d.id)).length;
+        const ab = S.selAb === e.id;
+        const q = ((S.selQ || {})[e.id] || "").trim().toLowerCase();
+        const chave = (d) => [d.tag, d.pav, d.ip, d.status].join(" ").toLowerCase();
+        let lista = "";
+        if (ab) {
+          const porPav = {};
+          ds.forEach((d) => (porPav[d.pav || "Sem pavimento"] = porPav[d.pav || "Sem pavimento"] || []).push(d));
+          lista =
+            `<div class="row" style="margin:6px 0;align-items:center"><input data-selq="${esc(e.id)}" value="${esc((S.selQ || {})[e.id] || "")}" placeholder="Filtrar: TAG, pavimento, IP ou situação" autocomplete="off" style="flex:1;min-width:180px;margin:0">` +
+            `<button class="b o s" data-a="selTodos" data-e="${esc(e.id)}" data-m="1" style="margin:0">Marcar ${q ? "os filtrados" : "todos"}</button><button class="b o s" data-a="selTodos" data-e="${esc(e.id)}" data-m="0" style="margin:0">Desmarcar ${q ? "os filtrados" : "todos"}</button></div>` +
+            `<div style="max-height:360px;overflow:auto;border:1px solid #e3e3e3;border-radius:8px;padding:6px 8px">` +
+            Object.entries(porPav)
+              .map(
+                ([pv, l]) =>
+                  `<div data-selpav><div class="sm" style="font-weight:700;margin:6px 0 2px">${esc(pv)}</div>` +
+                  l
+                    .map(
+                      (d) =>
+                        `<label data-selt="${esc(chave(d))}" style="display:flex;gap:8px;align-items:center;margin:2px 0;font-weight:400${q && !chave(d).includes(q) ? ";display:none" : ""}"><input type="checkbox" data-selinv="${esc(e.id)}" value="${esc(d.id)}"${sel.has(d.id) ? " checked" : ""} style="width:auto;margin:0"> <span>${esc(d.tag || d.id)}</span>${d.status && d.status !== "ONLINE" && d.status !== "OPERANDO" ? ` <span class="chip warn">${esc(d.status)}</span>` : ""}</label>`,
+                    )
+                    .join("") +
+                  "</div>",
+              )
+              .join("") +
+            "</div>";
+        }
+        return (
+          `<div style="background:#f6f7f9;border-radius:8px;padding:8px 10px;margin:6px 0"><div class="row" style="align-items:center;margin:0"><span><b>Dispositivos com preventiva:</b> <span data-selcnt="${esc(e.id)}" data-tot="${ds.length}">${n} de ${ds.length}</span></span>` +
+          `<button class="b ${ab ? "o " : ""}s" data-a="selAbre" data-e="${esc(e.id)}" style="margin:0">${ab ? "Fechar lista" : "Escolher dispositivos"}</button></div>` +
+          (n ? "" : '<div class="sm">Ainda não escolhidos: o relatório sai só com o nome do grupo. Escolha em quais foi feita a preventiva; todos recebem as atividades marcadas abaixo.</div>') +
+          lista +
+          "</div>"
+        );
+      }
+      // nome e TAGs do grupo no relatório quando a preventiva foi em parte dele
+      function grupoNoRelatorio(c, e, st) {
+        if (!e.invTipo || !(st.sel || []).length) return null;
+        const ds = invDoCliente(c).filter((d) => d.tipoCat === e.invTipo && d.status !== "VAZIO");
+        const m = new Map(ds.map((d) => [d.id, d]));
+        const ord = new Map(dispsDoGrupo(c, e).map((d, i) => [d.id, i]));
+        const tags = st.sel
+          .slice()
+          .sort((a, b) => (ord.has(a) ? ord.get(a) : 1e9) - (ord.has(b) ? ord.get(b) : 1e9))
+          .map((id) => (m.get(id) ? m.get(id).tag || id : id));
+        return { nome: `${tp(e.tipo).nome} (${tags.length} de ${ds.length || tags.length})${e.local ? " (" + e.local + ")" : ""}`, disp: tags };
       }
 
       function vCatalogo() {
@@ -3816,6 +3880,17 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
 
       document.addEventListener("input", (e) => {
         const el = e.target;
+        if (el.dataset && el.dataset.selq !== undefined) {
+          S.selQ = S.selQ || {};
+          S.selQ[el.dataset.selq] = el.value;
+          const q = el.value.trim().toLowerCase();
+          document.querySelectorAll(`[data-selinv="${CSS.escape(el.dataset.selq)}"]`).forEach((cb) => {
+            const lb = cb.closest("label");
+            lb.style.display = !q || lb.dataset.selt.includes(q) ? "flex" : "none";
+          });
+          el.parentNode.querySelectorAll("[data-a=selTodos]").forEach((b) => (b.textContent = (b.dataset.m === "1" ? "Marcar " : "Desmarcar ") + (q ? "os filtrados" : "todos")));
+          return;
+        }
         if (el.id === "gbusca") {
           S.gq = el.value;
           const r = $("#gRes");
@@ -3962,6 +4037,19 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         true,
       );
       document.addEventListener("change", (e) => {
+        if (e.target.dataset && e.target.dataset.selinv !== undefined) {
+          const v = S.visit,
+            id = e.target.dataset.selinv;
+          if (!v || !podeEditarVisita(v)) return;
+          const st = (v.ver[id] = { ...(v.ver[id] || {}) });
+          const s = new Set(st.sel || []);
+          e.target.checked ? s.add(e.target.value) : s.delete(e.target.value);
+          st.sel = [...s];
+          afterChange("visit.ver");
+          const cnt = document.querySelector(`[data-selcnt="${CSS.escape(id)}"]`);
+          if (cnt) cnt.textContent = `${document.querySelectorAll(`[data-selinv="${CSS.escape(id)}"]:checked`).length} de ${cnt.dataset.tot}`;
+          return;
+        }
         if (e.target.dataset && e.target.dataset.disp !== undefined) {
           const b = e.target.dataset.disp,
             t = e.target.value.trim();
@@ -4462,14 +4550,16 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 return {
                   sigla: s.sigla,
                   nome: s.nome,
-                  previstos: eqs.filter((e) => !(v.ver[e.id] || {}).off).map(nmEq),
+                  previstos: eqs.filter((e) => !(v.ver[e.id] || {}).off).map((e) => (grupoNoRelatorio(c, e, v.ver[e.id] || {}) || { nome: nmEq(e) }).nome),
                   feitos: eqs
                     .filter((e) => !(v.ver[e.id] || {}).off)
                     .map((e) => {
                       const t = tp(e.tipo),
-                        st = v.ver[e.id] || {};
+                        st = v.ver[e.id] || {},
+                        g = grupoNoRelatorio(c, e, st);
                       return {
-                        nome: nmEq(e),
+                        nome: g ? g.nome : nmEq(e),
+                        disp: g ? g.disp : [],
                         atividades: atvDe(e).filter((a, k) => !(st.no || {})[k]),
                         dias: t.extra === "dias" ? st.dias || [] : [],
                         status: st.st || STATUS_EQ[0],
@@ -4718,6 +4808,25 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         },
         nv() {
           newVisit(S.nv.cliId, S.nv.tipo);
+        },
+        selAbre(el) {
+          S.selAb = S.selAb === el.dataset.e ? "" : el.dataset.e;
+          render();
+        },
+        selTodos(el) {
+          const v = S.visit,
+            c = S.vcli;
+          if (!v || !c || !podeEditarVisita(v)) return;
+          const e = c.eqs.find((x) => x.id === el.dataset.e);
+          if (!e) return;
+          const q = ((S.selQ || {})[e.id] || "").trim().toLowerCase();
+          const alvo = dispsDoGrupo(c, e).filter((d) => !q || [d.tag, d.pav, d.ip, d.status].join(" ").toLowerCase().includes(q)).map((d) => d.id);
+          const st = (v.ver[e.id] = { ...(v.ver[e.id] || {}) });
+          const s = new Set(st.sel || []);
+          alvo.forEach((id) => (el.dataset.m === "1" ? s.add(id) : s.delete(id)));
+          st.sel = [...s];
+          afterChange("visit.ver");
+          render();
         },
         verTodos(el) {
           const v = S.visit,
@@ -5427,6 +5536,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             fin.push(P(B(`${s.sigla} (${s.nome})`), { spacing: { before: 160, after: 40 } }));
             s.feitos.forEach((e, n) => {
               fin.push(P(B(`${n + 1}.  ${e.nome}`), { indent: { left: 400 }, spacing: { before: 100, after: 40 } }));
+              if ((e.disp || []).length) fin.push(P([B("Dispositivos: "), R(e.disp.join(", "))], { indent: { left: 800 } }));
               if (e.atividades.length) {
                 fin.push(P(R("Atividades realizadas:"), { indent: { left: 800 } }));
                 e.atividades.forEach((a, k) => {
