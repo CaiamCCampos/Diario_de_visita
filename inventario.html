@@ -4418,6 +4418,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         /* ---------- Pendências do diário (com dias, prazo e situação por fórmula) ---------- */
         const PD = nova("Pendências", { frz: 4 });
         if (logoId !== null) PD.addImage(logoId, { tl: { col: 0, row: 0.1 }, ext: { width: 200, height: 27 } });
+        // coluna Problema: causa + problema registrado (ex.: "Fibra rompida · Fibra óptica 01 – ETE"); sem causa, o texto original
+        const probTxt = (p) => {
+          const c = p.causa && p.causa !== "diag" ? causaDe(p.causa).n : "";
+          return [c || "A diagnosticar", p.problemaNome].filter(Boolean).join(" · ");
+        };
         const pc = [
           ["id", "ID", 10],
           ["ab", "Aberta em", 11],
@@ -4465,7 +4470,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             pav: d0 ? d0.pav : null,
             cat: t ? t.nome : null,
             tit: p ? p.titulo || "(sem título)" : null,
-            prob: p ? p.problema || null : null,
+            prob: p ? probTxt(p) || null : null,
             stDiario: p ? p.status || null : null,
             prio: x ? x.prio : null,
             por: p ? p.criadaPorNome || null : null,
@@ -4534,12 +4539,58 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         });
         PD.getCell(9, 22).value = "Mude os dias em amarelo:";
         PD.getCell(10, 22).value = "os prazos se recalculam.";
+        // resumo: causas, problemas e os dispositivos de cada um (pendências em aberto; a contagem é fórmula)
+        {
+          const ab = calcP.filter((x) => x.p.aberta);
+          const grupos = new Map();
+          ab.forEach((x) => {
+            const k = probTxt(x.p);
+            const g = grupos.get(k) || { causa: x.p.causa && x.p.causa !== "diag" ? causaDe(x.p.causa).n : "A diagnosticar", prob: x.p.problemaNome || "—", txt: k, tags: [] };
+            const d = x.ids.length ? Object.values(S.inv).flatMap((dd) => dd.itens || []).find((i) => i.id === x.ids[0]) : null;
+            g.tags.push((d && d.tag) || x.p.dispTag || x.p.titulo || "?");
+            grupos.set(k, g);
+          });
+          const G = [...grupos.values()].sort((a, b) => b.tags.length - a.tags.length);
+          const L0 = 13;
+          PD.mergeCells(L0, 22, L0, 25);
+          const h = PD.getCell(L0, 22);
+          h.value = "CAUSAS E PROBLEMAS (EM ABERTO)";
+          h.font = xFont({ bold: true, color: "FFFFFF" });
+          h.alignment = { horizontal: "center", vertical: "middle" };
+          for (let c = 22; c <= 25; c++) PD.getCell(L0, c).fill = xFill(XC.acesso);
+          ["Causa", "Problema", "Em aberto", "Dispositivos"].forEach((t, i) => cab(PD, L0 + 1, 22 + i, t));
+          G.forEach((g, i) => {
+            const r = L0 + 2 + i;
+            const cel = [g.causa, g.prob, { formula: `COUNTIFS($${PC.prob}$5:$${PC.prob}$2000,"${g.txt.replace(/"/g, '""')}",$${PC.sit}$5:$${PC.sit}$2000,"EM ABERTO")`, result: g.tags.length }, g.tags.join(", ")];
+            cel.forEach((v, k) => {
+              const c = PD.getCell(r, 22 + k);
+              c.value = v;
+              c.border = xBorda;
+              c.font = xFont({ bold: k === 2 });
+              c.alignment = { vertical: "top", wrapText: true, horizontal: k === 2 ? "center" : "left" };
+              if (i % 2) c.fill = xFill(XC.zebra);
+            });
+          });
+          const rt = L0 + 2 + G.length;
+          PD.getCell(rt, 22).value = "Total";
+          PD.getCell(rt, 22).font = xFont({ bold: true });
+          PD.getCell(rt, 24).value = { formula: G.length ? `SUM(X${L0 + 2}:X${rt - 1})` : "0", result: ab.length };
+          PD.getCell(rt, 24).font = xFont({ bold: true });
+          PD.getCell(rt, 24).alignment = { horizontal: "center" };
+          for (let c = 22; c <= 25; c++) {
+            PD.getCell(rt, c).fill = xFill("D9D9D9");
+            PD.getCell(rt, c).border = xBorda;
+          }
+          PD.getColumn(23).width = 28;
+          PD.getColumn(24).width = 10;
+          PD.getColumn(25).width = 60;
+        }
         PD.getCell(11, 22).value = "O diário ainda não tem prioridade;";
         PD.getCell(12, 22).value = "todas entram como MÉDIA.";
         [9, 10, 11, 12].forEach((l) => (PD.getCell(l, 22).font = xFont({ size: 8, italic: true, color: "7F7F7F" })));
         PD.getColumn(21).width = 3;
         PD.getColumn(22).width = 16;
-        PD.getColumn(23).width = 8;
+        PD.getColumn(23).width = Math.max(8, PD.getColumn(23).width || 0);
         if (!calcP.length) PD.getCell(5, 8).value = "Nenhuma pendência registrada no diário para este cliente.";
         PD.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + calcP.length), column: pc.length } };
         PD.pageSetup.printTitlesRow = "4:4";
