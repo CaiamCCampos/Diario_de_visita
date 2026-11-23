@@ -2370,8 +2370,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         return `<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
   <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Elas são criadas e concluídas no diário; aqui você acompanha e vê o dispositivo ligado. Dispositivo que fica OFFLINE no inventário abre uma pendência no diário automaticamente.</div>
   ${(() => {
-    const semP = Object.values(S.inv).flatMap((d) => d.itens || []).filter((it) => it.status === "OFFLINE" && !pendDoItem(it.id).some((p) => p.aberta)).length;
-    return semP && pode("inv.editar") ? `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="sm" style="flex:1 1 240px"><b>${semP}</b> ${semP === 1 ? "dispositivo OFFLINE está" : "dispositivos OFFLINE estão"} sem pendência aberta no diário.</span><button class="b s" data-a="pendOffline" style="margin:0">Abrir pendências dos OFFLINE</button></div>` : "";
+    const todos = Object.values(S.inv).flatMap((d) => d.itens || []);
+    const semP = todos.filter((it) => SEM_REDE.includes(it.status) && !pendDoItem(it.id).some((p) => p.aberta) && !(quadroDoItem(S.inv, it) && SEM_REDE.includes(quadroDoItem(S.inv, it).it.status))).length;
+    const vazAb = todos.filter((it) => it.status === "VAZIO" && pendDoItem(it.id).some((p) => p.aberta && p.origem === "inventário")).length;
+    return pode("inv.editar") && (semP || vazAb)
+      ? `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${semP ? `<span class="sm" style="flex:1 1 240px"><b>${semP}</b> ${semP === 1 ? "dispositivo OFFLINE/FALHA está" : "dispositivos OFFLINE/FALHA estão"} sem pendência aberta no diário.</span><button class="b s" data-a="pendOffline" style="margin:0">Abrir pendências</button>` : ""}${vazAb ? `<span class="sm" style="flex:1 1 240px"><b>${vazAb}</b> dispositivo(s) VAZIO ainda com pendência automática aberta.</span><button class="b o s" data-a="pendVazio" style="margin:0">Concluir as dos vazios</button>` : ""}</div>`
+      : "";
   })()}
   <div class="filtros"><div><label>Mostrar</label><select data-f="fPend"><option value="aberta"${f === "aberta" ? " selected" : ""}>Em aberto</option><option value="concluida"${f === "concluida" ? " selected" : ""}>Concluídas</option><option value="todas"${f === "todas" ? " selected" : ""}>Todas</option></select></div></div>
   ${lista.map(card).join("") || '<div class="card"><p class="sm">Nenhuma pendência.</p></div>'}`;
@@ -2509,7 +2513,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const off = [];
         for (const [sis, d] of Object.entries(inv))
           for (const it of (d && d.itens) || []) {
-            if (it.status !== "OFFLINE") continue;
+            if (!SEM_REDE.includes(it.status)) continue; // só OFFLINE e FALHA; VAZIO (canal vazio) não abre pendência
             // o quadro de onde vem a rede também está sem rede: a pendência é do quadro, não do dispositivo
             const q = quadroDoItem(invTodo, it);
             if (q && SEM_REDE.includes(q.it.status)) continue;
@@ -2541,8 +2545,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             sis: t ? t.sis : sisCat(sis),
             eqId: "",
             problema: ehQuadro(it)
-              ? `Quadro de distribuição sem rede (OFFLINE)${it.obs ? " · " + it.obs : ""}. Afeta os dispositivos ligados a este quadro.`
-              : `Dispositivo OFFLINE no inventário${it.nvr ? ` (${it.nvr}${it.canal ? " canal " + it.canal : ""})` : ""}${it.ip ? " · IP " + it.ip : ""}`,
+              ? `Quadro de distribuição sem rede (${it.status})${it.obs ? " · " + it.obs : ""}. Afeta os dispositivos ligados a este quadro.`
+              : `Dispositivo ${it.status} no inventário${it.nvr ? ` (${it.nvr}${it.canal ? " canal " + it.canal : ""})` : ""}${it.ip ? " · IP " + it.ip : ""}`,
             diag: "",
             acoes: [],
             solucao: "",
@@ -2555,9 +2559,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             dispTag: it.tag || "",
             dispIp: it.ip || "",
             dispPav: it.pav || "",
-            dispStatus: "OFFLINE",
-            dispAplicado: `${it.id}|OFFLINE`,
-            historico: [{ data: hoje(), hora, ts: Date.now(), status: "Aberta", por: meuNome() + " (inventário: dispositivo OFFLINE)" }],
+            dispStatus: it.status,
+            dispAplicado: `${it.id}|${it.status}`,
+            historico: [{ data: hoje(), hora, ts: Date.now(), status: "Aberta", por: meuNome() + ` (inventário: dispositivo ${it.status})` }],
           });
           ja.add(it.id);
           n++;
@@ -2580,6 +2584,23 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           await DB.set("pendencias", p.id, p);
         }
         if (L.length) audita("agrupou pendências no quadro", "pendencias", cli.id, `${cli.unidade || ""} · ${qTag} · ${L.length}`);
+        return L.length;
+      }
+      // dispositivo VAZIO (canal sem câmera) não tem pendência: as automáticas ainda em branco são concluídas
+      async function fechaPendVazio(cli, devs) {
+        if (!devs.length) return 0;
+        const f = cli.equipeId ? { clienteId: cli.id, equipeId: cli.equipeId } : { clienteId: cli.id };
+        const ids = new Set(devs.map((d) => d.id));
+        const branco = (p) => !String(p.diag || "").trim() && !String(p.solucao || "").trim() && !String(p.obs || "").trim() && !String(p.texto || "").trim() && !(p.acoes || []).length;
+        const L = (await DB.list("pendencias", f)).filter((p) => p.aberta && ids.has(p.dispId) && p.origem === "inventário" && branco(p));
+        const d0 = new Date(),
+          hora = `${pad(d0.getHours())}:${pad(d0.getMinutes())}`;
+        for (const p of L) {
+          Object.assign(p, { aberta: false, concluidaEm: hoje(), concluidaPorId: (S.user && S.user.uid) || "", concluidaPorNome: meuNome(), solucao: "Canal vazio no NVR (sem câmera instalada): não é falha.", dispStatus: "VAZIO", dispAplicado: `${p.dispId}|VAZIO` });
+          p.historico = [...(p.historico || []), { data: hoje(), hora, ts: Date.now(), status: "Concluída", por: meuNome() + " (inventário: dispositivo VAZIO)" }];
+          await DB.set("pendencias", p.id, p);
+        }
+        if (L.length) audita("concluiu pendências de dispositivos vazios", "pendencias", cli.id, `${cli.unidade || ""} · ${L.length}`);
         return L.length;
       }
       // quadro voltou: os dispositivos ligados a ele que estavam sem rede voltam para ONLINE
@@ -2691,6 +2712,17 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             if (x) x.value = v;
           });
         },
+        async pendVazio(el) {
+          el.disabled = true;
+          try {
+            const n = await fechaPendVazio(S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId }, Object.values(S.inv).flatMap((d) => d.itens || []).filter((i) => i.status === "VAZIO"));
+            toast(n ? `${n} pendência(s) concluída(s) (canal vazio)` : "Nenhuma pendência automática em branco para concluir");
+          } catch (e) {
+            console.error(e);
+            toast("Não consegui concluir: " + (e.code || e.message));
+          }
+          el.disabled = false;
+        },
         async pendOffline(el) {
           el.disabled = true;
           try {
@@ -2766,7 +2798,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             const cli = S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId };
             const msg = ["Dispositivo salvo"];
             try {
-              if (n.status === "OFFLINE" && (stAntes !== "OFFLINE" || n.quadro !== qAntes) && (await abrePendOffline(cli, { [sis]: { itens: [n] } }, S.inv))) msg.push("pendência aberta no diário");
+              if (SEM_REDE.includes(n.status) && (!SEM_REDE.includes(stAntes) || n.quadro !== qAntes) && (await abrePendOffline(cli, { [sis]: { itens: [n] } }, S.inv))) msg.push("pendência aberta no diário");
+              // virou VAZIO (canal sem câmera): a pendência automática ainda em branco é concluída
+              if (n.status === "VAZIO" && stAntes !== "VAZIO" && (await fechaPendVazio(cli, [n]))) msg.push("pendência automática concluída (vazio)");
               // ligado agora a um quadro sem rede: a pendência própria (vazia) passa para o quadro
               const q = quadroDoItem(S.inv, n);
               if (q && SEM_REDE.includes(q.it.status) && n.quadro !== qAntes && (await agrupaNoQuadro(cli, [n], q.it.tag))) msg.push("pendência agrupada no quadro " + q.it.tag);
@@ -3028,7 +3062,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           audita("cadastrou dispositivo", "inventario", doc.id, `${cliNome(S.cliId)} · ${sis} · ${id} ${it.tag}`);
           const msg = [`Dispositivo ${id} cadastrado`];
           try {
-            if (it.status === "OFFLINE" && (await abrePendOffline(cli, { [sis]: { itens: [it] } }, S.inv))) msg.push("pendência aberta no diário");
+            if (SEM_REDE.includes(it.status) && (await abrePendOffline(cli, { [sis]: { itens: [it] } }, S.inv))) msg.push("pendência aberta no diário");
           } catch (e) {
             console.warn(e);
           }
@@ -3169,6 +3203,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             let nPend = 0;
             try {
               nPend = await abrePendOffline(cli, novoInv);
+              await fechaPendVazio(cli, Object.values(novoInv).flatMap((d) => d.itens || []).filter((i) => i.status === "VAZIO"));
             } catch (e) {
               console.warn(e);
               toast("Inventário salvo, mas não consegui abrir as pendências dos offline: " + (e.code || e.message));
