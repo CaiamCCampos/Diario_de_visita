@@ -280,6 +280,8 @@ const FERRAMENTAS = [
       const ehNvr = (i) => /\b(NVR|DVR)\b/.test(norm(i.tipo)) || /^(NVR|DVR)\b/.test(norm(i.tag));
       const ehCentral = (i) => /CENTRAL|PAINEL|REPETIDORA/.test(norm(i.tipo));
       const uso = (i) => {
+        // "em uso" digitado no inventário vale mais que a contagem
+        if (i.emUso !== undefined && i.emUso !== null && i.emUso !== "") return { n: +i.emUso || 0, auto: false };
         const L = todos.filter((x) => x.sistema === i.sistema && x.id !== i.id && x.status !== "VAZIO");
         if (ehNvr(i)) {
           const n = L.filter((x) => x.nvr && !ehNvr(x) && nvrKey(x.nvr) === nvrKey(i.tag)).length;
@@ -293,13 +295,13 @@ const FERRAMENTAS = [
           const n = L.filter((x) => !ehCentral(x)).length;
           return n ? { n, auto: true } : null;
         }
-        return i.emUso !== undefined && i.emUso !== null && i.emUso !== "" ? { n: +i.emUso, auto: false } : null;
+        return null;
       };
       const L = todos
         .map((i) => {
           const cap = +i.capacidade || 0,
             u = uso(i);
-          if (!cap && !(u && u.auto)) return null;
+          if (!cap && !u) return null;
           const unid = i.capUnid || (ehNvr(i) ? "canais" : ehQuadro(i) ? "portas" : ehCentral(i) ? (norm(i.sistema) === "SDAI" ? "enderecos" : "zonas") : "");
           return { equipamento: i.tag || i.id, id: i.id, sistema: i.sistema, tipo: i.tipo, capacidade: cap || "não informada", unidade: unid, em_uso: u ? u.n : "não informado", uso_contado_pelo_sistema: !!(u && u.auto), livres: cap && u ? cap - u.n : null, ocupacao_pct: cap && u ? Math.round((u.n / cap) * 100) : null };
         })

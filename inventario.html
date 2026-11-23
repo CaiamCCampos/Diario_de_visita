@@ -1189,10 +1189,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       function capInfo(inv, sis, it) {
         const cap = +it.capacidade || 0;
         const au = usoAuto(inv, sis, it);
-        const uso = au ? au.n : it.emUso !== undefined && it.emUso !== "" ? +it.emUso || 0 : null;
-        if (!cap && !au) return null;
+        const manual = it.emUso !== undefined && it.emUso !== null && it.emUso !== "";
+        // "em uso" preenchido à mão vale mais que a contagem do sistema (o cadastro pode estar incompleto)
+        const uso = manual ? +it.emUso || 0 : au ? au.n : null;
+        if (!cap && !au && !manual) return null;
         const pc = cap && uso !== null ? Math.round((uso / cap) * 100) : null;
-        return { cap, unid: it.capUnid || sugereUnid(sis, it), uso, auto: !!au, au, livres: cap && uso !== null ? cap - uso : null, pct: pc, nivel: pc === null ? "" : pc > 100 ? "acima" : pc >= 90 ? "cheio" : pc >= 75 ? "alto" : "ok" };
+        return { cap, unid: it.capUnid || sugereUnid(sis, it), uso, auto: !manual && !!au, manual, contado: au ? au.n : null, au, livres: cap && uso !== null ? cap - uso : null, pct: pc, nivel: pc === null ? "" : pc > 100 ? "acima" : pc >= 90 ? "cheio" : pc >= 75 ? "alto" : "ok" };
       }
       const barraCap = (c) =>
         !c || c.pct === null
@@ -2173,7 +2175,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         return `<div class="cent"><b class="rd">Capacidade</b><div class="sm" style="margin:2px 0 6px">Deixe em branco para dispositivo unitário (ex.: câmera).</div>
   <div class="g"><div><label>Capacidade</label><input id="e_capacidade" type="number" min="0" value="${esc(it.capacidade ?? "")}"${ro} placeholder="ex.: 32"></div>
   <div><label>Unidade</label><input id="e_capUnid" list="dlCapUnid" value="${esc(it.capUnid || "")}"${ro} placeholder="${esc(sugereUnid(sis, it) || "ex.: canais, portas, saídas")}"></div>
-  <div><label>Em uso${au ? " (contado pelo sistema)" : ""}</label><input id="e_emUso" type="number" min="0" value="${esc(au ? au.n : it.emUso ?? "")}"${au ? " readonly" : ro}${au ? ' title="Contado a partir dos dispositivos ligados"' : ""}></div></div>
+  <div><label>Em uso</label><input id="e_emUso" type="number" min="0" value="${esc(it.emUso ?? "")}"${ro} placeholder="${au ? esc(String(au.n)) + " (contado)" : ""}">${au ? `<div class="sm">${it.emUso !== undefined && it.emUso !== "" ? `Valor manual. O sistema conta ${au.n}; apague para voltar à contagem.` : `Contado pelo sistema: ${au.n}. Digite outro número se estiver diferente.`}</div>` : ""}</div></div>
   ${c && c.cap ? `<div class="sm" style="margin:6px 0 4px"><b>${esc(txtCap(c))}</b></div>${barraCap(c)}` : c ? `<div class="sm" style="margin-top:6px">${esc(txtCap(c))}</div>` : ""}${lig}
   <datalist id="dlCapUnid">${CAP_UNID.map((u) => `<option value="${u}">`).join("")}</datalist></div>`;
       }
@@ -2483,12 +2485,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           return `<tr><td>${esc(sis)}</td><td><a data-a="vaiItem" data-id="${esc(it.id)}">${esc(it.id)}</a></td><td><b>${esc(it.tag || "")}</b><div class="sm">${esc(it.tipo || "")}${it.modelo ? " · " + esc(it.modelo) : ""}</div></td>
   <td><input data-cap="${k}" data-k="capacidade" type="number" min="0" value="${esc(vv(sis, it, "capacidade"))}" style="width:80px"${ed ? "" : " readonly"}></td>
   <td><input data-cap="${k}" data-k="capUnid" list="dlCapUnid" value="${esc(vv(sis, it, "capUnid"))}" placeholder="${esc(sugereUnid(sis, it))}" style="width:110px"${ed ? "" : " readonly"}></td>
-  <td>${c && c.auto ? `<b>${c.uso}</b><div class="sm">contado</div>` : `<input data-cap="${k}" data-k="emUso" type="number" min="0" value="${esc(vv(sis, it, "emUso"))}" style="width:70px"${ed ? "" : " readonly"}>`}</td>
+  <td><input data-cap="${k}" data-k="emUso" type="number" min="0" value="${esc(vv(sis, it, "emUso"))}" placeholder="${c && c.contado !== null ? esc(String(c.contado)) : ""}" style="width:70px"${ed ? "" : " readonly"}>${c && c.contado !== null ? `<div class="sm">${c.manual ? `manual · sistema conta ${c.contado}` : "contado"}</div>` : ""}</td>
   <td>${c && c.livres !== null ? (c.livres < 0 ? `<span class="rd">${c.livres}</span>` : c.livres) : "—"}</td>
   <td style="min-width:110px">${c && c.pct !== null ? `<div class="sm">${c.pct}%</div>${barraCap(c)}` : "—"}</td></tr>`;
         });
         return `<div class="kpis">${kp("Com capacidade informada", comCap.length)}${kp("Acima de 90%", comCap.filter((x) => ["cheio", "acima"].includes(x.c.nivel)).length, "red")}${cc ? kp("Canais de NVR em uso", `${cu}<span class="sm"> de ${cc}</span>`) + kp("Canais livres", cc - cu, "ok") : ""}</div>
-  <div class="note" style="background:#f6f6f7">Capacidade de NVRs, centrais, switches, controladoras e o que mais precisar. Deixe em branco nos dispositivos unitários (câmeras, sensores). O <b>em uso</b> é contado sozinho no NVR (câmeras com aquele NVR), no switch/quadro (dispositivos ligados a ele) e na central do SDAI; nos outros, preencha à mão.</div>
+  <div class="note" style="background:#f6f6f7">Capacidade de NVRs, centrais, switches, controladoras e o que mais precisar. Deixe em branco nos dispositivos unitários (câmeras, sensores). O <b>em uso</b> é contado sozinho no NVR (câmeras com aquele NVR), no switch/quadro (dispositivos ligados a ele) e na central do SDAI. Se a contagem não bater com o real, digite o número certo: o valor digitado vale mais que a contagem (apague para voltar a contar).</div>
   <div class="filtros"><div><label>Buscar</label><input data-f="fCap" value="${esc(S.fCap || "")}" placeholder="TAG, tipo, modelo"></div><div><label class="k" style="margin:0 0 6px"><input type="checkbox" data-f="capTodos"${S.capTodos ? " checked" : ""}> Mostrar todos os dispositivos</label></div></div>
   <div class="tblw"><table class="tbl"><thead><tr><th>Sistema</th><th>ID</th><th>Dispositivo</th><th>Capacidade</th><th>Unidade</th><th>Em uso</th><th>Livres</th><th>Ocupação</th></tr></thead><tbody>${lin.join("") || '<tr><td colspan="8" class="sm">Nenhum equipamento com capacidade. Marque "Mostrar todos os dispositivos" para incluir.</td></tr>'}</tbody></table></div>
   <datalist id="dlCapUnid">${CAP_UNID.map((u) => `<option value="${u}">`).join("")}</datalist>
@@ -3082,7 +3084,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               else delete n.capUnid;
               if (ee && !ee.readOnly) {
                 if (ee.value !== "" && +ee.value >= 0) n.emUso = +ee.value;
-                else delete n.emUso;
+                else delete n.emUso; // vazio: volta a usar a contagem do sistema
               }
             }
             const eq = $("#e_quadro");
