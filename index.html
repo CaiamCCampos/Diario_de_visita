@@ -2818,7 +2818,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const [v, pa, pc, ex] = await Promise.all([
             listaDesde("visitas", filtro(), "data", desde),
             DB.list("pendencias", filtro({ aberta: true })),
-            listaDesde("pendencias", filtro({ aberta: false }), "concluidaEm", desde),
+            listaDesde("pendencias", filtro({ aberta: false }), "concluidaEm", desde).then((l) => l.filter((x) => !x.desconsiderada)),
             S.me.papel !== "admin" && S.me.equipeId
               ? DB.list("visitas", { equipeAutorId: S.me.equipeId, excecao: true })
               : Promise.resolve([]),
@@ -3634,7 +3634,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         C.carregando = true;
         C.erro = "";
         try {
-          C.lista = await listaDesde("pendencias", filtro({ aberta: false }), "concluidaEm", C.per === "todos" ? "" : diasAtras(+(C.per || 180)));
+          C.lista = (await listaDesde("pendencias", filtro({ aberta: false }), "concluidaEm", C.per === "todos" ? "" : diasAtras(+(C.per || 180)))).filter((x) => !x.desconsiderada);
         } catch (e) {
           console.error(e);
           C.lista = [];
@@ -4088,7 +4088,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       async function loadClientData(id) {
         const f = fCli(S.cli);
         // só as pendências vêm de início; as visitas (documentos grandes) só são lidas quando a aba "Visitas" é aberta
-        const p = await DB.list("pendencias", f);
+        // pendência "desconsiderada" (dispositivo marcado como VAZIO no inventário) não é aberta nem concluída: fica fora das listas
+        const p = (await DB.list("pendencias", f)).filter((x) => !x.desconsiderada);
         if (!S.cli || S.cli.id !== id) return;
         if (S.cliExc) S.hist = [];
         S.pc = p;

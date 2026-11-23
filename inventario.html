@@ -1634,7 +1634,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const k = [S.pend, ...Object.values(S.inv).map((d) => `${d.id}:${d.atualizadoEm}:${(d.itens || []).length}`)];
         if (cachePend.k && cachePend.k.length === k.length && cachePend.k.every((x, i) => x === k[i])) return cachePend.m;
         const m = new Map();
-        (S.pend || []).forEach((p) => pendDisp(p).forEach((id) => (m.get(id) || m.set(id, []).get(id)).push(p)));
+        (S.pend || []).filter((p) => !p.desconsiderada).forEach((p) => pendDisp(p).forEach((id) => (m.get(id) || m.set(id, []).get(id)).push(p)));
         cachePend = { k, m };
         return m;
       }
@@ -2345,7 +2345,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       }
 
       function vPend() {
-        const L = (S.pend || []).slice(),
+        const L = (S.pend || []).filter((p) => !p.desconsiderada),
+          des = (S.pend || []).filter((p) => p.desconsiderada),
           f = S.fPend || "aberta";
         const ab = L.filter((p) => p.aberta),
           co = L.filter((p) => !p.aberta);
@@ -2354,7 +2355,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const fc = S.fCausa || "",
           fp = S.fProb || "";
         const ed = pode("inv.editar");
-        const base0 = f === "aberta" ? ab : f === "concluida" ? co : L;
+        const base0 = f === "aberta" ? ab : f === "concluida" ? co : f === "desconsiderada" ? des : L;
         const porCausa = {};
         base0.forEach((p) => (porCausa[p.causa || "diag"] = (porCausa[p.causa || "diag"] || 0) + 1));
         const lista = base0.filter((p) => (!fc || (p.causa || "diag") === fc) && (!fp || (fp === "-" ? !p.problemaId : p.problemaId === fp))).sort((a, b) =>
@@ -2371,7 +2372,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 .map((x) => `<option value="${esc(x.id)}"${x.id === p.problemaId ? " selected" : ""}>${esc(x.nome)}</option>`)
                 .join("")}</select></div></div>`
             : `<div class="sm" style="margin-top:4px">Causa: <b>${esc(ca.n)}</b>${pr ? ` · Problema: <b>${esc(pr.nome)}</b>` : ""}</div>`;
-          return `<div class="al ${p.aberta ? "NOK" : "OK"}" style="opacity:1"><div class="t"><b>${ed && p.aberta ? `<input type="checkbox" data-psel="${esc(p.id)}"${(S.pSel || {})[p.id] ? " checked" : ""} style="margin-right:6px">` : ""}${esc(p.titulo || "(sem título)")}</b><span class="chip ${p.aberta ? "red" : "ok"}">${p.aberta ? "Em aberto há " + dias(p.criada, hoje()) + " dia(s)" : "Concluída " + bd(p.concluidaEm)}</span></div>
+          return `<div class="al ${p.aberta ? "NOK" : "OK"}" style="opacity:1"><div class="t"><b>${ed && p.aberta ? `<input type="checkbox" data-psel="${esc(p.id)}"${(S.pSel || {})[p.id] ? " checked" : ""} style="margin-right:6px">` : ""}${esc(p.titulo || "(sem título)")}</b><span class="chip ${p.aberta ? "red" : p.desconsiderada ? "" : "ok"}">${p.aberta ? "Em aberto há " + dias(p.criada, hoje()) + " dia(s)" : p.desconsiderada ? "Desconsiderada " + bd(p.desconsideradaEm) + " (dispositivo VAZIO)" : "Concluída " + bd(p.concluidaEm)}</span></div>
   <div class="sm">${pendSis(p) ? `<b>${esc(pendSis(p))}</b>` : ""}${t ? " · " + esc(t.nome) : ""}${p.status ? " · " + esc(p.status) : ""} · aberta por ${esc(p.criadaPorNome || "(sem registro)")} em ${bd(p.criada)}${!p.aberta && p.concluidaEm ? ` · concluída em ${bd(p.concluidaEm)}${p.concluidaPorNome ? " por " + esc(p.concluidaPorNome) : ""}` : ""}</div>
   ${p.problema ? `<div class="sm" style="margin-top:4px">${esc(p.problema)}</div>` : ""}${linhaCausa}${!p.aberta && p.solucao ? `<div class="sm" style="margin-top:4px"><b>Solução:</b> ${esc(p.solucao)}</div>` : ""}
   ${ids.length ? `<div class="ids sm">${p.dispId ? "Dispositivo" : "TAG citada"}: ${ids.map((id) => `<a data-a="vaiItem" data-id="${esc(id)}">${esc(id)}</a>`).join("")}${p.dispId && p.dispTag ? " " + esc(p.dispTag) : ""}${p.dispId && p.dispStatus ? ` · situação marcada: <span class="st ${esc(p.dispStatus)}">${esc(p.dispStatus)}</span>` : ""}</div>${(() => {
@@ -2383,13 +2384,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   })()}` : '<div class="sm" style="color:var(--d)">Sem dispositivo ligado. No diário, escolha o dispositivo na pendência (campo "Dispositivo do inventário").</div>'}</div>`;
         };
         return `<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
-  <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Elas são criadas e concluídas no diário; aqui você acompanha e vê o dispositivo ligado. Dispositivo que fica OFFLINE no inventário abre uma pendência no diário automaticamente.</div>
+  <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Dispositivo que fica OFFLINE ou em FALHA no inventário abre uma pendência automaticamente; se ele for marcado como VAZIO, a pendência é desconsiderada. A conclusão é sempre feita no diário.</div>
   ${(() => {
     const todos = Object.values(S.inv).flatMap((d) => d.itens || []);
-    const semP = todos.filter((it) => SEM_REDE.includes(it.status) && !pendDoItem(it.id).some((p) => p.aberta) && !(quadroDoItem(S.inv, it) && SEM_REDE.includes(quadroDoItem(S.inv, it).it.status))).length;
+    const semP = todos.filter((it) => SEM_REDE.includes(it.status) && !pendDoItem(it.id).some((p) => p.aberta)).length;
     const vazAb = todos.filter((it) => it.status === "VAZIO" && pendDoItem(it.id).some((p) => p.aberta && p.origem === "inventário")).length;
     return pode("inv.editar") && (semP || vazAb)
-      ? `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${semP ? `<span class="sm" style="flex:1 1 240px"><b>${semP}</b> ${semP === 1 ? "dispositivo OFFLINE/FALHA está" : "dispositivos OFFLINE/FALHA estão"} sem pendência aberta no diário.</span><button class="b s" data-a="pendOffline" style="margin:0">Abrir pendências</button>` : ""}${vazAb ? `<span class="sm" style="flex:1 1 240px"><b>${vazAb}</b> dispositivo(s) VAZIO ainda com pendência automática aberta.</span><button class="b o s" data-a="pendVazio" style="margin:0">Concluir as dos vazios</button>` : ""}</div>`
+      ? `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${semP ? `<span class="sm" style="flex:1 1 240px"><b>${semP}</b> ${semP === 1 ? "dispositivo OFFLINE/FALHA está" : "dispositivos OFFLINE/FALHA estão"} sem pendência aberta no diário.</span><button class="b s" data-a="pendOffline" style="margin:0">Abrir pendências</button>` : ""}${vazAb ? `<span class="sm" style="flex:1 1 240px"><b>${vazAb}</b> dispositivo(s) VAZIO ainda com pendência automática aberta.</span><button class="b o s" data-a="pendVazio" style="margin:0">Desconsiderar as dos vazios</button>` : ""}</div>`
       : "";
   })()}
   ${
@@ -2400,7 +2401,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           .join("")}</div></div>`
       : ""
   }
-  <div class="filtros"><div><label>Mostrar</label><select data-f="fPend"><option value="aberta"${f === "aberta" ? " selected" : ""}>Em aberto</option><option value="concluida"${f === "concluida" ? " selected" : ""}>Concluídas</option><option value="todas"${f === "todas" ? " selected" : ""}>Todas</option></select></div>
+  <div class="filtros"><div><label>Mostrar</label><select data-f="fPend"><option value="aberta"${f === "aberta" ? " selected" : ""}>Em aberto</option><option value="concluida"${f === "concluida" ? " selected" : ""}>Concluídas</option><option value="todas"${f === "todas" ? " selected" : ""}>Todas</option><option value="desconsiderada"${f === "desconsiderada" ? " selected" : ""}>Desconsideradas (vazio)${des.length ? " · " + des.length : ""}</option></select></div>
   <div><label>Causa</label><select data-f="fCausa">${optCausas(fc, "Todas")}</select></div>
   <div><label>Problema</label><select data-f="fProb"><option value="">Todos</option><option value="-"${fp === "-" ? " selected" : ""}>Sem problema</option>${problemas().map((x) => `<option value="${esc(x.id)}"${x.id === fp ? " selected" : ""}>${esc(x.nome)}${x.status === "resolvido" ? " (resolvido)" : ""}</option>`).join("")}</select></div></div>
   ${
@@ -2453,7 +2454,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const porC = {};
         ab.forEach((x) => (porC[x.causa] = (porC[x.causa] || 0) + afetadosDo(x).length));
         return `<div class="kpis"><div class="kpi red"><div class="r">Problemas em aberto</div><div class="n">${ab.length}</div></div><div class="kpi"><div class="r">Dispositivos afetados</div><div class="n">${ab.reduce((a, x) => a + afetadosDo(x).length, 0)}</div></div><div class="kpi ok"><div class="r">Resolvidos</div><div class="n">${P.length - ab.length}</div></div></div>
-  <div class="note" style="background:#f6f6f7">Um <b>problema</b> é a causa real de uma ou mais falhas (ex.: "Fibra 01 – ETE"). Ligue as pendências a ele na aba Pendências (uma a uma ou várias de uma vez). Ao marcar o problema como resolvido, o sistema conclui as pendências ligadas e devolve os dispositivos para ONLINE.</div>
+  <div class="note" style="background:#f6f6f7">Um <b>problema</b> é a causa real de uma ou mais falhas (ex.: "Fibra 01 – ETE"). Ligue as pendências a ele na aba Pendências (uma a uma ou várias de uma vez). Ao marcar o problema como resolvido, os dispositivos voltam para ONLINE e as pendências ligadas recebem a anotação; a conclusão de cada pendência é feita no diário.</div>
   ${Object.keys(porC).length ? `<div class="card"><b class="sm">Dispositivos afetados por causa</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${Object.entries(porC).sort((a, b) => b[1] - a[1]).map(([c, n]) => `<span class="chip">${esc(causaDe(c).n)}: <b>${n}</b></span>`).join("")}</div></div>` : ""}
   ${ed && sug.length ? `<div class="card"><b class="sm">Quadros sem rede sem problema registrado</b>${sug.map((q) => `<div class="sm" style="margin-top:6px">${esc(q.it.tag)}${q.it.obs ? " · " + esc(q.it.obs) : ""} <button class="b o s" data-a="probSugere" data-id="${esc(q.it.id)}" style="margin:0 0 0 6px">Criar problema</button></div>`).join("")}</div>` : ""}
   ${ed && !N ? '<button class="b" data-a="probNovo">+ Novo problema</button>' : ""}${form}
@@ -2663,14 +2664,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         for (const [sis, d] of Object.entries(inv))
           for (const it of (d && d.itens) || []) {
             if (!SEM_REDE.includes(it.status)) continue; // só OFFLINE e FALHA; VAZIO (canal vazio) não abre pendência
-            // o quadro de onde vem a rede também está sem rede: a pendência é do quadro, não do dispositivo
-            const q = quadroDoItem(invTodo, it);
-            if (q && SEM_REDE.includes(q.it.status)) continue;
             off.push([sis, it]);
           }
         if (!off.length) return 0;
         const f = cli.equipeId ? { clienteId: cli.id, equipeId: cli.equipeId } : { clienteId: cli.id };
-        const abertas = (await DB.list("pendencias", f)).filter((p) => p.aberta);
+        const todasP = await DB.list("pendencias", f);
+        const abertas = todasP.filter((p) => p.aberta);
         const ja = new Set(abertas.map((p) => p.dispId).filter(Boolean));
         const jaTag = new Set(abertas.filter((p) => !p.dispId).map((p) => semAcento(p.titulo || "").toUpperCase().trim()).filter(Boolean));
         const d0 = new Date(),
@@ -2680,7 +2679,23 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (ja.has(it.id) || (it.tag && jaTag.has(semAcento(it.tag).toUpperCase().trim()))) continue;
           const tId = tipoCatDe(sis, it),
             t = tipoCat(tId);
-          const pr = problemas().find((x) => x.status !== "resolvido" && x.localId === it.id);
+          // problema aberto no próprio dispositivo ou no quadro de onde ele recebe rede
+          const qd = quadroDoItem(invTodo, it);
+          const pr = problemas().find((x) => x.status !== "resolvido" && (x.localId === it.id || (qd && SEM_REDE.includes(qd.it.status) && x.localId === qd.it.id)));
+          // pendência desconsiderada antes (dispositivo estava VAZIO): reabre a mesma, mantendo o histórico
+          const des = todasP.find((p) => p.desconsiderada && p.dispId === it.id);
+          if (des) {
+            const d1 = new Date();
+            const q2 = { ...des, aberta: true, desconsiderada: false, dispStatus: it.status, dispAplicado: `${it.id}|${it.status}`, titulo: it.tag || des.titulo, dispTag: it.tag || "" };
+            delete q2.desconsideradaEm;
+            delete q2.desconsideradaPor;
+            if (pr && !q2.problemaId) Object.assign(q2, { problemaId: pr.id, problemaNome: pr.nome, causa: q2.causa && q2.causa !== "diag" ? q2.causa : pr.causa });
+            q2.historico = [...(des.historico || []), { data: hoje(), hora: `${pad(d1.getHours())}:${pad(d1.getMinutes())}`, ts: Date.now(), status: "Reaberta", por: meuNome() + ` (inventário: dispositivo ${it.status})` }];
+            await DB.set("pendencias", des.id, q2);
+            ja.add(it.id);
+            n++;
+            continue;
+          }
           const id = uid();
           await DB.set("pendencias", id, {
             id,
@@ -2696,7 +2711,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             eqId: "",
             problema: ehQuadro(it)
               ? `Quadro de distribuição sem rede (${it.status})${it.obs ? " · " + it.obs : ""}. Afeta os dispositivos ligados a este quadro.`
-              : `Dispositivo ${it.status} no inventário${it.nvr ? ` (${it.nvr}${it.canal ? " canal " + it.canal : ""})` : ""}${it.ip ? " · IP " + it.ip : ""}`,
+              : `Dispositivo ${it.status} no inventário${it.nvr ? ` (${it.nvr}${it.canal ? " canal " + it.canal : ""})` : ""}${it.ip ? " · IP " + it.ip : ""}${qd && SEM_REDE.includes(qd.it.status) ? ` · recebe rede do ${qd.it.tag}, que está sem rede` : ""}`,
             diag: "",
             acoes: [],
             solucao: "",
@@ -2738,22 +2753,32 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (L.length) audita("agrupou pendências no quadro", "pendencias", cli.id, `${cli.unidade || ""} · ${qTag} · ${L.length}`);
         return L.length;
       }
-      // dispositivo VAZIO (canal sem câmera) não tem pendência: as automáticas ainda em branco são concluídas
+      // dispositivo VAZIO (canal sem câmera) não tem pendência: as pendências automáticas dele são DESCONSIDERADAS
+      // (não contam como concluídas e somem das listas; se o dispositivo voltar a OFFLINE/FALHA, a mesma pendência é reaberta).
+      // Concluir pendência é só no diário.
       async function fechaPendVazio(cli, devs) {
         if (!devs.length) return 0;
         const f = cli.equipeId ? { clienteId: cli.id, equipeId: cli.equipeId } : { clienteId: cli.id };
         const ids = new Set(devs.map((d) => d.id));
-        const branco = (p) => !String(p.diag || "").trim() && !String(p.solucao || "").trim() && !String(p.obs || "").trim() && !String(p.texto || "").trim() && !(p.acoes || []).length;
-        const L = (await DB.list("pendencias", f)).filter((p) => p.aberta && ids.has(p.dispId) && p.origem === "inventário" && branco(p));
+        const L = (await DB.list("pendencias", f)).filter((p) => p.aberta && ids.has(p.dispId) && p.origem === "inventário");
         const d0 = new Date(),
           hora = `${pad(d0.getHours())}:${pad(d0.getMinutes())}`;
         for (const p of L) {
-          Object.assign(p, { aberta: false, concluidaEm: hoje(), concluidaPorId: (S.user && S.user.uid) || "", concluidaPorNome: meuNome(), solucao: "Canal vazio no NVR (sem câmera instalada): não é falha.", dispStatus: "VAZIO", dispAplicado: `${p.dispId}|VAZIO` });
-          p.historico = [...(p.historico || []), { data: hoje(), hora, ts: Date.now(), status: "Concluída", por: meuNome() + " (inventário: dispositivo VAZIO)" }];
+          Object.assign(p, { aberta: false, desconsiderada: true, desconsideradaEm: hoje(), desconsideradaPor: meuNome(), dispStatus: "VAZIO", dispAplicado: `${p.dispId}|VAZIO` });
+          p.historico = [...(p.historico || []), { data: hoje(), hora, ts: Date.now(), status: "Desconsiderada", por: meuNome() + " (inventário: dispositivo VAZIO)" }];
           await DB.set("pendencias", p.id, p);
         }
-        if (L.length) audita("concluiu pendências de dispositivos vazios", "pendencias", cli.id, `${cli.unidade || ""} · ${L.length}`);
+        if (L.length) audita("desconsiderou pendências de dispositivos vazios", "pendencias", cli.id, `${cli.unidade || ""} · ${L.length}`);
         return L.length;
+      }
+      // pendências abertas dos dispositivos que recebem rede de um quadro com problema aberto passam a apontar para esse problema
+      async function ligaAoProblemaDoQuadro(q, devs) {
+        const pr = problemas().find((x) => x.status !== "resolvido" && x.localId === q.id);
+        if (!pr || !devs.length) return 0;
+        const ids = new Set(devs.map((d) => d.id));
+        let n = 0;
+        for (const p of (S.pend || []).filter((p) => p.aberta && !p.problemaId && ids.has(p.dispId))) if (await gravaCausa(p, pr.causa, pr.id)) n++;
+        return n;
       }
       // quadro voltou: os dispositivos ligados a ele que estavam sem rede voltam para ONLINE
       async function cascataQuadro(q) {
@@ -2977,15 +3002,15 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (!x) return;
           const pab = (S.pend || []).filter((p) => p.aberta && p.problemaId === x.id);
           const sr = afetadosDo(x).filter((y) => SEM_REDE.includes(y.it.status));
-          if (!confirm(`Marcar "${x.nome}" como resolvido?\n\n• ${pab.length} pendência(s) ligada(s) serão concluídas\n• ${sr.length} dispositivo(s) sem rede voltam para ONLINE`)) return;
+          if (!confirm(`Marcar "${x.nome}" como resolvido?\n\n• ${sr.length} dispositivo(s) sem rede voltam para ONLINE no inventário\n• as ${pab.length} pendência(s) ligada(s) continuam abertas para serem concluídas no diário (recebem a anotação de que o problema foi resolvido)`)) return;
           el.disabled = true;
           try {
             const d0 = new Date(),
               hora = `${pad(d0.getHours())}:${pad(d0.getMinutes())}`;
             for (const p of pab) {
-              const q = { ...p, aberta: false, concluidaEm: hoje(), concluidaPorId: (S.user && S.user.uid) || "", concluidaPorNome: meuNome(), solucao: p.solucao || `Resolvido junto com o problema "${x.nome}".` };
+              const q = { ...p, solucao: p.solucao || `Problema "${x.nome}" resolvido em ${bd(hoje())}. Conferir e concluir.` };
               if (p.dispId && sr.some((y) => y.it.id === p.dispId)) Object.assign(q, { dispStatus: "ONLINE", dispAplicado: `${p.dispId}|ONLINE` });
-              q.historico = [...(p.historico || []), { data: hoje(), hora, ts: Date.now(), status: "Concluída", por: meuNome() + ` (problema "${x.nome}" resolvido)` }];
+              q.historico = [...(p.historico || []), { data: hoje(), hora, ts: Date.now(), status: "Atualizada", por: meuNome() + ` (problema "${x.nome}" resolvido no inventário)` }];
               await DB.set("pendencias", p.id, q);
             }
             const sists = new Set();
@@ -3003,7 +3028,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               if (y) Object.assign(y, { status: "resolvido", resolvidoEm: hoje(), resolvidoPor: meuNome(), atualizadoEm: agora(), atualizadoPor: meuNome() });
             });
             audita("resolveu problema", "inventarioMeta", S.cliId, `${cliNome(S.cliId)} · ${x.nome} · ${pab.length} pendência(s), ${sr.length} dispositivo(s)`);
-            toast(`Resolvido: ${pab.length} pendência(s) concluída(s), ${sr.length} dispositivo(s) ONLINE`);
+            toast(`Problema resolvido: ${sr.length} dispositivo(s) ONLINE · ${pab.length} pendência(s) aguardando conclusão no diário`);
           } catch (e) {
             console.error(e);
             toast("Não consegui concluir: " + (e.code === "permission-denied" ? "sem permissão" : e.code || e.message));
@@ -3015,7 +3040,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           el.disabled = true;
           try {
             const n = await fechaPendVazio(S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId }, Object.values(S.inv).flatMap((d) => d.itens || []).filter((i) => i.status === "VAZIO"));
-            toast(n ? `${n} pendência(s) concluída(s) (canal vazio)` : "Nenhuma pendência automática em branco para concluir");
+            toast(n ? `${n} pendência(s) desconsiderada(s) (dispositivo vazio)` : "Nenhuma pendência automática aberta nos vazios");
           } catch (e) {
             console.error(e);
             toast("Não consegui concluir: " + (e.code || e.message));
@@ -3099,15 +3124,15 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             try {
               if (SEM_REDE.includes(n.status) && (!SEM_REDE.includes(stAntes) || n.quadro !== qAntes) && (await abrePendOffline(cli, { [sis]: { itens: [n] } }, S.inv))) msg.push("pendência aberta no diário");
               // virou VAZIO (canal sem câmera): a pendência automática ainda em branco é concluída
-              if (n.status === "VAZIO" && stAntes !== "VAZIO" && (await fechaPendVazio(cli, [n]))) msg.push("pendência automática concluída (vazio)");
-              // ligado agora a um quadro sem rede: a pendência própria (vazia) passa para o quadro
+              if (n.status === "VAZIO" && stAntes !== "VAZIO" && (await fechaPendVazio(cli, [n]))) msg.push("pendência desconsiderada (vazio)");
+              // ligado a um quadro sem rede que tem problema aberto: a pendência do dispositivo é ligada a esse problema
               const q = quadroDoItem(S.inv, n);
-              if (q && SEM_REDE.includes(q.it.status) && n.quadro !== qAntes && (await agrupaNoQuadro(cli, [n], q.it.tag))) msg.push("pendência agrupada no quadro " + q.it.tag);
+              if (q && SEM_REDE.includes(q.it.status) && n.quadro !== qAntes && (await ligaAoProblemaDoQuadro(q.it, [n]))) msg.push("pendência ligada ao problema do " + q.it.tag);
               if (ehQuadro(n)) {
                 const lig = ligadosAo(S.inv, n);
                 if (SEM_REDE.includes(n.status) && !SEM_REDE.includes(stAntes)) {
-                  const k = await agrupaNoQuadro(cli, lig.map((x) => x.it), n.tag);
-                  if (k) msg.push(k + " pendência(s) de dispositivos agrupada(s) neste quadro");
+                  const k = await ligaAoProblemaDoQuadro(n, lig.map((x) => x.it));
+                  if (k) msg.push(k + " pendência(s) ligada(s) ao problema do quadro");
                 }
                 const semRede = lig.filter((x) => SEM_REDE.includes(x.it.status)).length;
                 if (["ONLINE", "OPERANDO"].includes(n.status) && SEM_REDE.includes(stAntes) && semRede && confirm(`O quadro ${n.tag} voltou (${n.status}).\n\nMarcar também como ONLINE os ${semRede} dispositivo(s) ligados a ele que estão sem rede?`)) msg.push((await cascataQuadro(n)) + " dispositivo(s) voltaram para ONLINE");
@@ -4028,7 +4053,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const al = calcAlertas(S.inv, m),
           alAt = al.filter(alertaAtivo),
           r = resumo(S.inv, m, S.aces);
-        const pend = S.pend || [];
+        const pend = (S.pend || []).filter((p) => !p.desconsiderada);
         const usaQuadro = quadrosDe(S.inv).length > 0 || Object.values(S.inv).some((d) => (d.itens || []).some((i) => i.quadro));
         // colunas de cada aba de sistema (o painel usa as mesmas letras nas fórmulas)
         const colsSis = (sis) => [
