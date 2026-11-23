@@ -9,7 +9,7 @@
      ACESSO_TOKEN  texto aleatório; o endereço do conector fica .../mcp/<ACESSO_TOKEN>
    ========================================================================== */
 
-const VERSAO = "1.1.0";
+const VERSAO = "1.2.0";
 const PROTOCOLO = "2025-06-18";
 const SEM_REDE = ["OFFLINE", "FALHA"];
 const OK = ["ONLINE", "OPERANDO"];
@@ -21,6 +21,8 @@ const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : 0);
 const hojeISO = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10); // horário de Brasília
 const dias = (iso) => (iso ? Math.max(0, Math.round((new Date(hojeISO()) - new Date(String(iso).slice(0, 10))) / 864e5)) : null);
 const ehQuadro = (it) => /QUADRO|SWITCH/.test(norm(it && it.tipo));
+const CAUSAS = { diag: "A diagnosticar", fibra: "Fibra rompida", cabo: "Cabo de rede rompido", switch: "Switch / PoE com defeito", radio: "Rádio / antena", conector: "Conector / patch cord", alim: "Falta de alimentação", fonte: "Fonte queimada", nobreak: "Nobreak / estabilizador", disjuntor: "Disjuntor desarmado", defeito: "Dispositivo com defeito (troca)", lente: "Lente / visão comprometida", ip: "IP em conflito / rede", senha: "Senha / usuário", firmware: "Firmware", canal: "Canal mal configurado no NVR", hd: "HD cheio ou com defeito", nvr: "NVR / DVR travado ou com defeito", obra: "Obra no local", desligado: "Desligado pelo cliente", vandal: "Vandalismo", removido: "Dispositivo removido", outro: "Outro" };
+const nomeCausa = (c) => CAUSAS[c || "diag"] || c;
 
 /* ---------------- Firestore (REST) ---------------- */
 let tokenCache = { valor: "", expira: 0 };
@@ -212,13 +214,16 @@ const FERRAMENTAS = [
   {
     name: "pendencias_abertas",
     description: "Pendências em aberto no diário de um cliente: título, dispositivo, problema, há quantos dias está aberta, quem abriu e o status escrito pelo técnico.",
-    inputSchema: { type: "object", properties: { cliente: { type: "string" }, dias_minimo: { type: "integer", description: "Opcional: só as abertas há pelo menos N dias" }, limite: { type: "integer" } }, required: ["cliente"] },
+    inputSchema: { type: "object", properties: { cliente: { type: "string" }, dias_minimo: { type: "integer", description: "Opcional: só as abertas há pelo menos N dias" }, causa: { type: "string", description: "Opcional: só uma causa (ex.: fibra, alimentação, defeito)" }, limite: { type: "integer" } }, required: ["cliente"] },
     async run(fs, a) {
       const cli = await achaCliente(fs, a.cliente);
-      let L = (await pendAbertas(fs, cli)).map((p) => ({ titulo: p.titulo || "(sem título)", sistema: p.sis || p.dispSis || "", dispositivo: p.dispTag || p.dispId || "", situacao_do_dispositivo: p.dispStatus || "", problema: p.problema || "", status_no_diario: p.status || "", aberta_em: p.criada, dias_aberta: dias(p.criada), aberta_por: p.criadaPorNome || "", ja_tem_acoes: (p.acoes || []).length > 0 || !!p.diag }));
+      let L = (await pendAbertas(fs, cli)).map((p) => ({ causa: nomeCausa(p.causa), problema: p.problemaNome || "", titulo: p.titulo || "(sem título)", sistema: p.sis || p.dispSis || "", dispositivo: p.dispTag || p.dispId || "", situacao_do_dispositivo: p.dispStatus || "", problema: p.problema || "", status_no_diario: p.status || "", aberta_em: p.criada, dias_aberta: dias(p.criada), aberta_por: p.criadaPorNome || "", ja_tem_acoes: (p.acoes || []).length > 0 || !!p.diag }));
       if (a.dias_minimo) L = L.filter((p) => p.dias_aberta >= a.dias_minimo);
+      if (a.causa) L = L.filter((p) => norm(p.causa).includes(norm(a.causa)));
+      const porCausa = {};
+      L.forEach((p) => (porCausa[p.causa] = (porCausa[p.causa] || 0) + 1));
       const lim = Math.min(Math.max(+a.limite || 60, 1), 300);
-      return { cliente: cli.nome, quantidade: L.length, sem_nada_preenchido: L.filter((p) => !p.ja_tem_acoes).length, pendencias: L.slice(0, lim), cortado: L.length > lim ? `mostrando ${lim} de ${L.length}` : undefined };
+      return { cliente: cli.nome, quantidade: L.length, por_causa: porCausa, sem_nada_preenchido: L.filter((p) => !p.ja_tem_acoes).length, pendencias: L.slice(0, lim), cortado: L.length > lim ? `mostrando ${lim} de ${L.length}` : undefined };
     },
   },
   {
@@ -235,6 +240,29 @@ const FERRAMENTAS = [
       });
       const semQuadro = todos.filter((i) => !ehQuadro(i) && !i.quadro);
       return { cliente: cli.nome, quadros: Q, sem_rede: Q.filter((q) => SEM_REDE.includes(q.status)).map((q) => q.quadro), dispositivos_sem_quadro_informado: semQuadro.length, offline_sem_quadro_informado: semQuadro.filter((i) => i.status === "OFFLINE").length };
+    },
+  },
+  {
+    name: "problemas",
+    description: "Problemas (causas reais) registrados de um cliente, como 'Fibra 01 – ETE rompida': causa, situação (aberto, em andamento, resolvido), onde, há quantos dias e quantas pendências/dispositivos estão ligados. Use para 'por que as câmeras estão fora', 'quantas caíram por fibra'.",
+    inputSchema: { type: "object", properties: { cliente: { type: "string" }, incluir_resolvidos: { type: "boolean" } }, required: ["cliente"] },
+    async run(fs, a) {
+      const cli = await achaCliente(fs, a.cliente);
+      const meta = await fs.get("inventarioMeta", cli.id);
+      const P = ((meta && meta.problemas) || []).filter((x) => !x.excluido && (a.incluir_resolvidos || x.status !== "resolvido"));
+      const pend = await pendAbertas(fs, cli);
+      const docs = await inventario(fs, cli);
+      const todos = docs.flatMap((d) => d.itens);
+      return {
+        cliente: cli.nome,
+        problemas: P.map((x) => {
+          const ps = pend.filter((p) => p.problemaId === x.id);
+          const loc = todos.find((i) => i.id === x.localId);
+          const lig = loc && ehQuadro(loc) ? todos.filter((i) => i.quadro && norm(i.quadro) === norm(loc.tag) && ["OFFLINE", "FALHA"].includes(i.status)).length : 0;
+          return { problema: x.nome, causa: nomeCausa(x.causa), situacao: x.status, onde: x.localTag || "", aberto_em: x.criadoEm, dias: dias(x.criadoEm), resolvido_em: x.resolvidoEm || undefined, pendencias_abertas: ps.length, dispositivos: ps.map((p) => p.dispTag || p.titulo), dispositivos_sem_rede_no_quadro: lig || undefined, observacao: x.obs || undefined };
+        }),
+        pendencias_abertas_por_causa: pend.reduce((o, p) => ((o[nomeCausa(p.causa)] = (o[nomeCausa(p.causa)] || 0) + 1), o), {}),
+      };
     },
   },
   {

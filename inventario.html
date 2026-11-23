@@ -1858,7 +1858,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               (d.itens || []).forEach((it) => it.status && (it.status = normSt(it.status)));
               S.inv[d.sistema] = d;
             });
-            if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas", "catalogo", "pendencias", "capacidade"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
+            if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas", "catalogo", "pendencias", "capacidade", "problemas"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
             render();
           }),
           DB.listen("inventarioAcessos", f, null, (a) => {
@@ -1989,10 +1989,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           disp = base ? Math.round((ok / base) * 1000) / 10 : 0;
         const nPendAb = (S.pend || []).filter((p) => p.aberta).length;
         const nSemCat = al.filter((a) => a.tipo === "Tipo sem catálogo" && alertaAtivo(a)).length;
+        const nProbAb = problemas().filter((x) => x.status !== "resolvido").length;
         const nCapCheio = al.filter((a) => (a.tipo === "Acima da capacidade" || a.tipo === "Capacidade quase no limite") && alertaAtivo(a)).length;
         const abas = [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))];
-        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "capacidade" ? "on" : ""}" data-aba="capacidade">Capacidade${nCapCheio ? ` <span class="chip red">${nCapCheio}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
-        const corpo = S.aba === "capacidade" ? vCapacidade() : S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
+        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "problemas" ? "on" : ""}" data-aba="problemas">Problemas${nProbAb ? ` <span class="chip red">${nProbAb}</span>` : ""}</button><button class="${S.aba === "capacidade" ? "on" : ""}" data-aba="capacidade">Capacidade${nCapCheio ? ` <span class="chip red">${nCapCheio}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
+        const corpo = S.aba === "problemas" ? vProblemas() : S.aba === "capacidade" ? vCapacidade() : S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
         return `<div class="card cinl"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3>${esc(cli.unidade)}</h3><div class="cacts">${cli.mp ? `<span class="chip">${esc(cli.mp)}</span>` : ""}<span class="chip">v${(m && m.versao) || 1}</span>
   ${pode("inv.novo") ? `<button class="b s" data-a="novoItem" data-sis="${esc(S.inv[S.aba] ? S.aba : "")}">+ Adicionar dispositivo</button><button class="b o s" data-a="criaCat" data-id="${esc(S.cliId)}">+ Pelo catálogo</button>` : ""}${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
   <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
@@ -2350,15 +2351,29 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           co = L.filter((p) => !p.aberta);
         const dias = (a, b) => (a && b ? Math.round((new Date(b) - new Date(a)) / 864e5) : "");
         const tm = co.map((p) => dias(p.criada, p.concluidaEm)).filter((x) => x !== "");
-        const lista = (f === "aberta" ? ab : f === "concluida" ? co : L).sort((a, b) =>
+        const fc = S.fCausa || "",
+          fp = S.fProb || "";
+        const ed = pode("inv.editar");
+        const base0 = f === "aberta" ? ab : f === "concluida" ? co : L;
+        const porCausa = {};
+        base0.forEach((p) => (porCausa[p.causa || "diag"] = (porCausa[p.causa || "diag"] || 0) + 1));
+        const lista = base0.filter((p) => (!fc || (p.causa || "diag") === fc) && (!fp || (fp === "-" ? !p.problemaId : p.problemaId === fp))).sort((a, b) =>
           f === "concluida" ? String(b.concluidaEm || "").localeCompare(String(a.concluidaEm || "")) : String(b.criada || "").localeCompare(String(a.criada || "")),
         );
         const card = (p) => {
           const t = tipoCat(p.tipoId),
             ids = pendDisp(p);
-          return `<div class="al ${p.aberta ? "NOK" : "OK"}" style="opacity:1"><div class="t"><b>${esc(p.titulo || "(sem título)")}</b><span class="chip ${p.aberta ? "red" : "ok"}">${p.aberta ? "Em aberto há " + dias(p.criada, hoje()) + " dia(s)" : "Concluída " + bd(p.concluidaEm)}</span></div>
+          const ca = causaDe(p.causa || "diag"),
+            pr = p.problemaId && probDe(p.problemaId);
+          const linhaCausa = ed
+            ? `<div class="g" style="margin-top:6px"><div><label>Causa</label><select data-pc="causa" data-id="${esc(p.id)}">${optCausas(p.causa || "diag")}</select></div><div><label>Problema</label><select data-pc="prob" data-id="${esc(p.id)}"><option value="">— nenhum —</option>${problemas()
+                .filter((x) => x.status !== "resolvido" || x.id === p.problemaId)
+                .map((x) => `<option value="${esc(x.id)}"${x.id === p.problemaId ? " selected" : ""}>${esc(x.nome)}</option>`)
+                .join("")}</select></div></div>`
+            : `<div class="sm" style="margin-top:4px">Causa: <b>${esc(ca.n)}</b>${pr ? ` · Problema: <b>${esc(pr.nome)}</b>` : ""}</div>`;
+          return `<div class="al ${p.aberta ? "NOK" : "OK"}" style="opacity:1"><div class="t"><b>${ed && p.aberta ? `<input type="checkbox" data-psel="${esc(p.id)}"${(S.pSel || {})[p.id] ? " checked" : ""} style="margin-right:6px">` : ""}${esc(p.titulo || "(sem título)")}</b><span class="chip ${p.aberta ? "red" : "ok"}">${p.aberta ? "Em aberto há " + dias(p.criada, hoje()) + " dia(s)" : "Concluída " + bd(p.concluidaEm)}</span></div>
   <div class="sm">${pendSis(p) ? `<b>${esc(pendSis(p))}</b>` : ""}${t ? " · " + esc(t.nome) : ""}${p.status ? " · " + esc(p.status) : ""} · aberta por ${esc(p.criadaPorNome || "(sem registro)")} em ${bd(p.criada)}${!p.aberta && p.concluidaEm ? ` · concluída em ${bd(p.concluidaEm)}${p.concluidaPorNome ? " por " + esc(p.concluidaPorNome) : ""}` : ""}</div>
-  ${p.problema ? `<div class="sm" style="margin-top:4px">${esc(p.problema)}</div>` : ""}${!p.aberta && p.solucao ? `<div class="sm" style="margin-top:4px"><b>Solução:</b> ${esc(p.solucao)}</div>` : ""}
+  ${p.problema ? `<div class="sm" style="margin-top:4px">${esc(p.problema)}</div>` : ""}${linhaCausa}${!p.aberta && p.solucao ? `<div class="sm" style="margin-top:4px"><b>Solução:</b> ${esc(p.solucao)}</div>` : ""}
   ${ids.length ? `<div class="ids sm">${p.dispId ? "Dispositivo" : "TAG citada"}: ${ids.map((id) => `<a data-a="vaiItem" data-id="${esc(id)}">${esc(id)}</a>`).join("")}${p.dispId && p.dispTag ? " " + esc(p.dispTag) : ""}${p.dispId && p.dispStatus ? ` · situação marcada: <span class="st ${esc(p.dispStatus)}">${esc(p.dispStatus)}</span>` : ""}</div>${(() => {
     const q = p.dispId && quadrosDe(S.inv).find((x) => x.it.id === p.dispId);
     if (!q) return "";
@@ -2377,10 +2392,73 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       ? `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${semP ? `<span class="sm" style="flex:1 1 240px"><b>${semP}</b> ${semP === 1 ? "dispositivo OFFLINE/FALHA está" : "dispositivos OFFLINE/FALHA estão"} sem pendência aberta no diário.</span><button class="b s" data-a="pendOffline" style="margin:0">Abrir pendências</button>` : ""}${vazAb ? `<span class="sm" style="flex:1 1 240px"><b>${vazAb}</b> dispositivo(s) VAZIO ainda com pendência automática aberta.</span><button class="b o s" data-a="pendVazio" style="margin:0">Concluir as dos vazios</button>` : ""}</div>`
       : "";
   })()}
-  <div class="filtros"><div><label>Mostrar</label><select data-f="fPend"><option value="aberta"${f === "aberta" ? " selected" : ""}>Em aberto</option><option value="concluida"${f === "concluida" ? " selected" : ""}>Concluídas</option><option value="todas"${f === "todas" ? " selected" : ""}>Todas</option></select></div></div>
+  ${
+    Object.keys(porCausa).length
+      ? `<div class="card"><b class="sm">Por causa (${f === "aberta" ? "em aberto" : f === "concluida" ? "concluídas" : "todas"})</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${Object.entries(porCausa)
+          .sort((a, b) => b[1] - a[1])
+          .map(([c, n]) => `<button class="chip${c === "diag" ? " am" : ""}" data-a="filtraCausa" data-c="${esc(c)}" style="cursor:pointer;border:1px solid ${fc === c ? "var(--p)" : "transparent"}">${esc(causaDe(c).n)}: <b>${n}</b></button>`)
+          .join("")}</div></div>`
+      : ""
+  }
+  <div class="filtros"><div><label>Mostrar</label><select data-f="fPend"><option value="aberta"${f === "aberta" ? " selected" : ""}>Em aberto</option><option value="concluida"${f === "concluida" ? " selected" : ""}>Concluídas</option><option value="todas"${f === "todas" ? " selected" : ""}>Todas</option></select></div>
+  <div><label>Causa</label><select data-f="fCausa">${optCausas(fc, "Todas")}</select></div>
+  <div><label>Problema</label><select data-f="fProb"><option value="">Todos</option><option value="-"${fp === "-" ? " selected" : ""}>Sem problema</option>${problemas().map((x) => `<option value="${esc(x.id)}"${x.id === fp ? " selected" : ""}>${esc(x.nome)}${x.status === "resolvido" ? " (resolvido)" : ""}</option>`).join("")}</select></div></div>
+  ${
+    ed && f !== "concluida"
+      ? `<div class="card" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap"><span class="sm" style="flex:1 1 100%"><b>${Object.values(S.pSel || {}).filter(Boolean).length}</b> selecionada(s) · <a data-a="pSelTodas">marcar as ${lista.filter((p) => p.aberta).length} da lista</a> · <a data-a="pSelNenhuma">desmarcar</a></span>
+  <div><label>Causa</label><select id="loteCausa">${optCausas("", "— não mudar —")}</select></div><div><label>Problema</label><select id="loteProb"><option value="">— não mudar —</option><option value="-">tirar do problema</option>${problemas().filter((x) => x.status !== "resolvido").map((x) => `<option value="${esc(x.id)}">${esc(x.nome)}</option>`).join("")}</select></div><button class="b s" data-a="loteCausa" style="margin:0">Aplicar às selecionadas</button></div>`
+      : ""
+  }
   ${lista.map(card).join("") || '<div class="card"><p class="sm">Nenhuma pendência.</p></div>'}`;
       }
 
+      /* ---- aba Problemas: os casos reais (fibra 01 rompida…) com os dispositivos e pendências afetados ---- */
+      function vProblemas() {
+        const ed = pode("inv.editar");
+        const todosDisp = Object.entries(S.inv).flatMap(([sis, d]) => (d.itens || []).map((it) => ({ sis, it })));
+        const P = problemas().slice().sort((a, b) => (a.status === "resolvido") - (b.status === "resolvido") || String(b.criadoEm || "").localeCompare(String(a.criadoEm || "")));
+        const dias = (iso) => (iso ? Math.max(0, Math.round((new Date(hoje()) - new Date(String(iso).slice(0, 10))) / 864e5)) : 0);
+        // quadros sem rede que ainda não têm problema: sugere criar
+        const sug = quadrosDe(S.inv).filter((q) => SEM_REDE.includes(q.it.status) && !P.some((x) => x.status !== "resolvido" && x.localId === q.it.id));
+        const N = S.novoProb;
+        const form = N
+          ? `<div class="card" style="border:2px solid var(--p)"><h2>${N.id ? "Editar problema" : "Novo problema"}</h2>
+  <div class="g"><div><label>Causa</label><select id="np_causa">${optCausas(N.causa || "diag")}</select></div><div><label>Nome do problema</label><input id="np_nome" value="${esc(N.nome || "")}" placeholder="Ex.: Fibra 01 – ETE"></div></div>
+  <div class="g"><div><label>Onde (dispositivo do inventário, opcional)</label><input id="np_local" list="dlNpLocal" value="${esc(N.localTxt || "")}" placeholder="Ex.: QD ETE" autocomplete="off"><datalist id="dlNpLocal">${todosDisp
+              .slice()
+              .sort((a, b) => ehQuadro(b.it) - ehQuadro(a.it))
+              .map((x) => `<option value="${esc((x.it.tag || x.it.id) + " · " + x.it.id)}">`)
+              .join("")}</datalist><div class="sm">Se for um quadro/switch, os dispositivos ligados a ele sem rede entram como afetados.</div></div>
+  <div><label>Situação</label><select id="np_status">${Object.entries(ST_PROB).map(([k, n]) => `<option value="${k}"${k === (N.status || "aberto") ? " selected" : ""}>${n}</option>`).join("")}</select></div></div>
+  <label>Observação</label><textarea id="np_obs" rows="2">${esc(N.obs || "")}</textarea>
+  <div><button class="b" data-a="probSalva">Salvar</button><button class="b o" data-a="probFecha">Cancelar</button></div></div>`
+          : "";
+        const card = (x) => {
+          const ca = causaDe(x.causa),
+            af = afetadosDo(x),
+            pends = (S.pend || []).filter((p) => p.problemaId === x.id),
+            pab = pends.filter((p) => p.aberta);
+          return `<div class="al ${x.status === "resolvido" ? "OK" : "NOK"}" style="opacity:1"><div class="t"><b>${esc(x.nome)}</b><span class="chip ${x.status === "resolvido" ? "ok" : x.status === "andamento" ? "am" : "red"}">${ST_PROB[x.status] || x.status}${x.status !== "resolvido" ? " · há " + dias(x.criadoEm) + " dia(s)" : x.resolvidoEm ? " em " + bd(x.resolvidoEm) : ""}</span></div>
+  <div class="sm">${esc(ca.g)} · <b>${esc(ca.n)}</b>${ca.r ? " · responsável: " + esc(RESP[ca.r]) : ""}${x.localTag ? " · onde: <b>" + esc(x.localTag) + "</b>" : ""} · aberto por ${esc(x.criadoPor || "")} em ${bd(x.criadoEm)}</div>
+  ${x.obs ? `<div class="sm" style="margin-top:4px">${esc(x.obs)}</div>` : ""}
+  <div class="sm" style="margin-top:4px"><b>${af.length}</b> dispositivo(s) afetado(s) · <b>${pab.length}</b> pendência(s) em aberto${pends.length - pab.length ? ` · ${pends.length - pab.length} concluída(s)` : ""}</div>
+  ${af.length ? `<div class="ids sm">${af.map((y) => `<a data-a="vaiItem" data-id="${esc(y.it.id)}">${esc(y.it.tag || y.it.id)}${SEM_REDE.includes(y.it.status) ? " ⚠" : ""}</a>`).join("")}</div>` : ""}
+  ${
+    ed
+      ? `<div style="margin-top:6px">${pab.length ? `<button class="b o s" data-a="probVerPend" data-id="${esc(x.id)}">Ver pendências</button>` : ""}<button class="b o s" data-a="probEdita" data-id="${esc(x.id)}">Editar</button>${x.status === "aberto" ? `<button class="b o s" data-a="probStatus" data-id="${esc(x.id)}" data-s="andamento">Em andamento</button>` : ""}${x.status !== "resolvido" ? `<button class="b s" data-a="probResolve" data-id="${esc(x.id)}">Resolvido</button>` : `<button class="b o s" data-a="probStatus" data-id="${esc(x.id)}" data-s="aberto">Reabrir</button>`}</div>`
+      : ""
+  }</div>`;
+        };
+        const ab = P.filter((x) => x.status !== "resolvido");
+        const porC = {};
+        ab.forEach((x) => (porC[x.causa] = (porC[x.causa] || 0) + afetadosDo(x).length));
+        return `<div class="kpis"><div class="kpi red"><div class="r">Problemas em aberto</div><div class="n">${ab.length}</div></div><div class="kpi"><div class="r">Dispositivos afetados</div><div class="n">${ab.reduce((a, x) => a + afetadosDo(x).length, 0)}</div></div><div class="kpi ok"><div class="r">Resolvidos</div><div class="n">${P.length - ab.length}</div></div></div>
+  <div class="note" style="background:#f6f6f7">Um <b>problema</b> é a causa real de uma ou mais falhas (ex.: "Fibra 01 – ETE"). Ligue as pendências a ele na aba Pendências (uma a uma ou várias de uma vez). Ao marcar o problema como resolvido, o sistema conclui as pendências ligadas e devolve os dispositivos para ONLINE.</div>
+  ${Object.keys(porC).length ? `<div class="card"><b class="sm">Dispositivos afetados por causa</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${Object.entries(porC).sort((a, b) => b[1] - a[1]).map(([c, n]) => `<span class="chip">${esc(causaDe(c).n)}: <b>${n}</b></span>`).join("")}</div></div>` : ""}
+  ${ed && sug.length ? `<div class="card"><b class="sm">Quadros sem rede sem problema registrado</b>${sug.map((q) => `<div class="sm" style="margin-top:6px">${esc(q.it.tag)}${q.it.obs ? " · " + esc(q.it.obs) : ""} <button class="b o s" data-a="probSugere" data-id="${esc(q.it.id)}" style="margin:0 0 0 6px">Criar problema</button></div>`).join("")}</div>` : ""}
+  ${ed && !N ? '<button class="b" data-a="probNovo">+ Novo problema</button>' : ""}${form}
+  ${P.map(card).join("") || '<div class="card"><p class="sm">Nenhum problema registrado.</p></div>'}`;
+      }
       /* ---- aba Capacidade: NVRs, centrais, switches, controladoras… com capacidade, uso e espaço livre ---- */
       const RE_CAP = /NVR|DVR|CENTRAL|PAINEL|CONTROLADORA|SWITCH|QUADRO|SERVIDOR|GERENCIADORA|AMPLIFICADOR|MODULO|REPETIDORA|FONTE|RACK/;
       function vCapacidade() {
@@ -2506,6 +2584,77 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         S.meta = m;
         return grava("inventarioMeta", m.id, m);
       }
+      /* ---- causas e problemas ----
+         CAUSA = tipo de falha (lista fixa, igual em todos os clientes; a mesma lista está no diário).
+         PROBLEMA = o caso real de um cliente ("Fibra 01 – ETE"), guardado em inventarioMeta.problemas;
+         as pendências apontam para ele (pendencia.problemaId) e cada uma tem a sua causa (pendencia.causa). */
+      const CAUSAS = [
+        ["diag", "—", "A diagnosticar", ""],
+        ["fibra", "Infraestrutura de rede", "Fibra rompida", "contrato"],
+        ["cabo", "Infraestrutura de rede", "Cabo de rede rompido", "contrato"],
+        ["switch", "Infraestrutura de rede", "Switch / PoE com defeito", "contrato"],
+        ["radio", "Infraestrutura de rede", "Rádio / antena", "contrato"],
+        ["conector", "Infraestrutura de rede", "Conector / patch cord", "contrato"],
+        ["alim", "Energia", "Falta de alimentação", "contrato"],
+        ["fonte", "Energia", "Fonte queimada", "contrato"],
+        ["nobreak", "Energia", "Nobreak / estabilizador", "contrato"],
+        ["disjuntor", "Energia", "Disjuntor desarmado", "contrato"],
+        ["defeito", "Dispositivo", "Dispositivo com defeito (troca)", "controller"],
+        ["lente", "Dispositivo", "Lente / visão comprometida", "controller"],
+        ["ip", "Configuração", "IP em conflito / rede", "controller"],
+        ["senha", "Configuração", "Senha / usuário", "controller"],
+        ["firmware", "Configuração", "Firmware", "controller"],
+        ["canal", "Configuração", "Canal mal configurado no NVR", "controller"],
+        ["hd", "Gravação", "HD cheio ou com defeito", "controller"],
+        ["nvr", "Gravação", "NVR / DVR travado ou com defeito", "controller"],
+        ["obra", "Externo", "Obra no local", "cliente"],
+        ["desligado", "Externo", "Desligado pelo cliente", "cliente"],
+        ["vandal", "Externo", "Vandalismo", "cliente"],
+        ["removido", "Externo", "Dispositivo removido", "cliente"],
+        ["outro", "Outros", "Outro", ""],
+      ].map(([id, g, n, r]) => ({ id, g, n, r }));
+      const RESP = { controller: "Controller", cliente: "Cliente", contrato: "Conforme contrato" };
+      const causaDe = (id) => CAUSAS.find((c) => c.id === id) || CAUSAS[0];
+      const optCausas = (sel, vazio) =>
+        (vazio ? `<option value="">${esc(vazio)}</option>` : "") +
+        [...new Set(CAUSAS.map((c) => c.g))]
+          .map((g) => (g === "—" ? CAUSAS.filter((c) => c.g === g).map((c) => `<option value="${c.id}"${c.id === sel ? " selected" : ""}>${esc(c.n)}</option>`).join("") : `<optgroup label="${esc(g)}">${CAUSAS.filter((c) => c.g === g).map((c) => `<option value="${c.id}"${c.id === sel ? " selected" : ""}>${esc(c.n)}</option>`).join("")}</optgroup>`))
+          .join("");
+      const problemas = () => ((S.meta && S.meta.problemas) || []).filter((x) => !x.excluido);
+      const probDe = (id) => problemas().find((x) => x.id === id);
+      const ST_PROB = { aberto: "Aberto", andamento: "Em andamento", resolvido: "Resolvido" };
+      // dispositivos afetados por um problema: os das pendências ligadas a ele + os que recebem rede do local (quadro) e estão sem rede
+      function afetadosDo(pr) {
+        const todos = Object.entries(S.inv).flatMap(([sis, d]) => (d.itens || []).map((it) => ({ sis, it })));
+        const ids = new Set((S.pend || []).filter((p) => p.problemaId === pr.id && (p.aberta || pr.status === "resolvido")).map((p) => p.dispId).filter(Boolean));
+        const loc = pr.localId && todos.find((x) => x.it.id === pr.localId);
+        if (loc) {
+          ids.add(loc.it.id);
+          if (ehQuadro(loc.it)) ligadosAo(S.inv, loc.it).forEach((x) => (pr.status === "resolvido" || SEM_REDE.includes(x.it.status)) && ids.add(x.it.id));
+        }
+        return todos.filter((x) => ids.has(x.it.id));
+      }
+      // grava causa/problema numa pendência (do diário), com registro no histórico
+      async function gravaCausa(p, causa, problemaId) {
+        const novo = { ...p };
+        const alt = [];
+        if (causa !== undefined && (p.causa || "") !== causa) {
+          alt.push({ c: "Causa", de: p.causa ? causaDe(p.causa).n : "", para: causa ? causaDe(causa).n : "" });
+          novo.causa = causa;
+        }
+        if (problemaId !== undefined && (p.problemaId || "") !== problemaId) {
+          alt.push({ c: "Problema", de: p.problemaId ? (probDe(p.problemaId) || {}).nome || "" : "", para: problemaId ? (probDe(problemaId) || {}).nome || "" : "" });
+          novo.problemaId = problemaId;
+          novo.problemaNome = problemaId ? (probDe(problemaId) || {}).nome || "" : "";
+          if (problemaId && (!novo.causa || novo.causa === "diag")) novo.causa = (probDe(problemaId) || {}).causa || novo.causa;
+        }
+        if (!alt.length) return false;
+        const d0 = new Date();
+        novo.historico = [...(p.historico || []), { data: hoje(), hora: `${pad(d0.getHours())}:${pad(d0.getMinutes())}`, ts: Date.now(), status: "Atualizada", por: meuNome() + " (inventário)", alt }];
+        await DB.set("pendencias", p.id, novo);
+        return true;
+      }
+
       /* ---- dispositivo OFFLINE vira pendência no diário ----
          uma pendência aberta por dispositivo; só o básico (dispositivo, tipo, problema). Ações, diagnóstico e solução
          ficam em branco para quem for atender preencher no diário. */
@@ -2531,6 +2680,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (ja.has(it.id) || (it.tag && jaTag.has(semAcento(it.tag).toUpperCase().trim()))) continue;
           const tId = tipoCatDe(sis, it),
             t = tipoCat(tId);
+          const pr = problemas().find((x) => x.status !== "resolvido" && x.localId === it.id);
           const id = uid();
           await DB.set("pendencias", id, {
             id,
@@ -2561,6 +2711,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             dispPav: it.pav || "",
             dispStatus: it.status,
             dispAplicado: `${it.id}|${it.status}`,
+            causa: pr ? pr.causa : "diag",
+            ...(pr ? { problemaId: pr.id, problemaNome: pr.nome } : {}),
             historico: [{ data: hoje(), hora, ts: Date.now(), status: "Aberta", por: meuNome() + ` (inventário: dispositivo ${it.status})` }],
           });
           ja.add(it.id);
@@ -2711,6 +2863,153 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             const x = document.getElementById(k);
             if (x) x.value = v;
           });
+        },
+        filtraCausa(el) {
+          S.fCausa = S.fCausa === el.dataset.c ? "" : el.dataset.c;
+          render();
+        },
+        pSelTodas() {
+          const f = S.fPend || "aberta",
+            fc = S.fCausa || "",
+            fp = S.fProb || "";
+          S.pSel = {};
+          (S.pend || []).filter((p) => p.aberta && (f !== "concluida") && (!fc || (p.causa || "diag") === fc) && (!fp || (fp === "-" ? !p.problemaId : p.problemaId === fp))).forEach((p) => (S.pSel[p.id] = true));
+          render();
+        },
+        pSelNenhuma() {
+          S.pSel = {};
+          render();
+        },
+        async loteCausa(el) {
+          const ids = Object.keys(S.pSel || {}).filter((k) => S.pSel[k]);
+          if (!ids.length) return toast("Marque as pendências na lista");
+          const c = $("#loteCausa").value,
+            pr = $("#loteProb").value;
+          if (!c && !pr) return toast("Escolha a causa e/ou o problema");
+          el.disabled = true;
+          let n = 0;
+          try {
+            for (const id of ids) {
+              const p = (S.pend || []).find((x) => x.id === id);
+              if (p && (await gravaCausa(p, c || undefined, pr === "" ? undefined : pr === "-" ? "" : pr))) n++;
+            }
+            audita("atribuiu causa/problema em lote", "pendencias", S.cliId, `${cliNome(S.cliId)} · ${n} pendência(s)`);
+            S.pSel = {};
+            toast(`${n} pendência(s) atualizada(s)`);
+          } catch (e) {
+            console.error(e);
+            toast("Não consegui salvar: " + (e.code === "permission-denied" ? "sem permissão" : e.code || e.message));
+          }
+          el.disabled = false;
+          render();
+        },
+        probNovo() {
+          S.novoProb = { causa: "diag", status: "aberto" };
+          render();
+        },
+        probSugere(el) {
+          const q = quadrosDe(S.inv).find((x) => x.it.id === el.dataset.id);
+          if (!q) return;
+          const fib = /FIBRA/i.test(semAcento(q.it.obs || ""));
+          S.novoProb = { causa: fib ? "fibra" : "diag", status: "aberto", nome: q.it.obs ? q.it.obs.replace(/\s*rompida\s*$/i, "") + " rompida" : "Sem rede no " + q.it.tag, localTxt: (q.it.tag || q.it.id) + " · " + q.it.id, obs: q.it.obs || "" };
+          S.aba = "problemas";
+          render();
+        },
+        probEdita(el) {
+          const x = probDe(el.dataset.id);
+          if (!x) return;
+          S.novoProb = { ...x, localTxt: x.localId ? (x.localTag || "") + " · " + x.localId : "" };
+          render();
+        },
+        probFecha() {
+          S.novoProb = null;
+          render();
+        },
+        async probSalva(el) {
+          const N = S.novoProb;
+          const nome = txt($("#np_nome").value);
+          if (!nome) return toast("Dê um nome ao problema (ex.: Fibra 01 – ETE)");
+          const lt = txt($("#np_local").value);
+          const lid = lt ? lt.split(" · ").pop().trim() : "";
+          const disp = lid && Object.values(S.inv).flatMap((d) => d.itens || []).find((i) => i.id === lid || nomeQ(i.tag) === nomeQ(lt));
+          if (lt && !disp) return toast("Escolha o local na lista (ou deixe em branco)");
+          const x = { ...(N.id ? probDe(N.id) : { id: uid(), criadoEm: hoje(), criadoPor: meuNome() }), causa: $("#np_causa").value, nome, status: $("#np_status").value, obs: txt($("#np_obs").value), localId: disp ? disp.id : "", localTag: disp ? disp.tag || disp.id : "", atualizadoEm: agora(), atualizadoPor: meuNome() };
+          if (x.status === "resolvido" && !x.resolvidoEm) Object.assign(x, { resolvidoEm: hoje(), resolvidoPor: meuNome() });
+          el.disabled = true;
+          try {
+            await salvaMeta((m) => {
+              m.problemas = (m.problemas || []).filter((y) => y.id !== x.id).concat(x);
+            });
+            // liga ao problema as pendências abertas dos dispositivos afetados que ainda não têm problema
+            let n = 0;
+            const ids = new Set(afetadosDo(x).map((y) => y.it.id));
+            for (const p of (S.pend || []).filter((p) => p.aberta && !p.problemaId && ids.has(p.dispId))) if (await gravaCausa(p, x.causa, x.id)) n++;
+            audita(N.id ? "alterou problema" : "registrou problema", "inventarioMeta", S.cliId, `${cliNome(S.cliId)} · ${x.nome}`);
+            S.novoProb = null;
+            toast(`Problema salvo${n ? ` · ${n} pendência(s) ligada(s) a ele` : ""}`);
+          } catch (e) {
+            console.error(e);
+            el.disabled = false;
+            toast("Não consegui salvar: " + (e.code === "permission-denied" ? "sem permissão" : e.code || e.message));
+          }
+          render();
+        },
+        async probStatus(el) {
+          const x = probDe(el.dataset.id);
+          if (!x) return;
+          await salvaMeta((m) => {
+            const y = (m.problemas || []).find((z) => z.id === x.id);
+            if (!y) return;
+            y.status = el.dataset.s;
+            y.atualizadoEm = agora();
+            y.atualizadoPor = meuNome();
+            if (el.dataset.s !== "resolvido") delete y.resolvidoEm;
+          });
+          toast("Problema: " + ST_PROB[el.dataset.s]);
+          render();
+        },
+        probVerPend(el) {
+          Object.assign(S, { aba: "pendencias", fPend: "aberta", fProb: el.dataset.id, fCausa: "" });
+          render();
+        },
+        async probResolve(el) {
+          const x = probDe(el.dataset.id);
+          if (!x) return;
+          const pab = (S.pend || []).filter((p) => p.aberta && p.problemaId === x.id);
+          const sr = afetadosDo(x).filter((y) => SEM_REDE.includes(y.it.status));
+          if (!confirm(`Marcar "${x.nome}" como resolvido?\n\n• ${pab.length} pendência(s) ligada(s) serão concluídas\n• ${sr.length} dispositivo(s) sem rede voltam para ONLINE`)) return;
+          el.disabled = true;
+          try {
+            const d0 = new Date(),
+              hora = `${pad(d0.getHours())}:${pad(d0.getMinutes())}`;
+            for (const p of pab) {
+              const q = { ...p, aberta: false, concluidaEm: hoje(), concluidaPorId: (S.user && S.user.uid) || "", concluidaPorNome: meuNome(), solucao: p.solucao || `Resolvido junto com o problema "${x.nome}".` };
+              if (p.dispId && sr.some((y) => y.it.id === p.dispId)) Object.assign(q, { dispStatus: "ONLINE", dispAplicado: `${p.dispId}|ONLINE` });
+              q.historico = [...(p.historico || []), { data: hoje(), hora, ts: Date.now(), status: "Concluída", por: meuNome() + ` (problema "${x.nome}" resolvido)` }];
+              await DB.set("pendencias", p.id, q);
+            }
+            const sists = new Set();
+            sr.forEach(({ sis, it }) => {
+              const n = S.inv[sis].itens.find((i) => i.id === it.id);
+              n.statusOrigem = { titulo: `Problema "${x.nome}" resolvido`, antes: n.status, depois: "ONLINE", em: agora(), por: meuNome() };
+              n.status = "ONLINE";
+              n.alteradoEm = agora();
+              n.alteradoPor = meuNome();
+              sists.add(sis);
+            });
+            for (const sis of sists) await salvaSistema(sis);
+            await salvaMeta((m) => {
+              const y = (m.problemas || []).find((z) => z.id === x.id);
+              if (y) Object.assign(y, { status: "resolvido", resolvidoEm: hoje(), resolvidoPor: meuNome(), atualizadoEm: agora(), atualizadoPor: meuNome() });
+            });
+            audita("resolveu problema", "inventarioMeta", S.cliId, `${cliNome(S.cliId)} · ${x.nome} · ${pab.length} pendência(s), ${sr.length} dispositivo(s)`);
+            toast(`Resolvido: ${pab.length} pendência(s) concluída(s), ${sr.length} dispositivo(s) ONLINE`);
+          } catch (e) {
+            console.error(e);
+            toast("Não consegui concluir: " + (e.code === "permission-denied" ? "sem permissão" : e.code || e.message));
+          }
+          el.disabled = false;
+          render();
         },
         async pendVazio(el) {
           el.disabled = true;
@@ -3420,9 +3719,21 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           S.capTodos = t.checked;
           return render();
         }
-        if (f === "fPend") {
-          S.fPend = t.value;
+        if (f === "fPend" || f === "fCausa" || f === "fProb") {
+          S[f] = t.value;
           return render();
+        }
+        if (t.dataset && t.dataset.psel) {
+          (S.pSel = S.pSel || {})[t.dataset.psel] = t.checked;
+          return render();
+        }
+        if (t.dataset && t.dataset.pc) {
+          const p = (S.pend || []).find((x) => x.id === t.dataset.id);
+          if (!p) return;
+          (t.dataset.pc === "causa" ? gravaCausa(p, t.value) : gravaCausa(p, undefined, t.value))
+            .then((ok) => ok && toast("Pendência atualizada"))
+            .catch((e) => toast("Não consegui salvar: " + (e.code === "permission-denied" ? "sem permissão" : e.code || e.message)));
+          return;
         }
         if (f === "fPav" || f === "fSt") {
           S[f] = t.value;

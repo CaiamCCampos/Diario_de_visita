@@ -2152,6 +2152,36 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       ];
       /* ---- Inventário (inventario.html): a pendência escolhe o dispositivo e pode mudar a situação dele ---- */
       const SIT_DISP = ["ONLINE", "OPERANDO", "FALHA", "OFFLINE"];
+      // causas de falha (a mesma lista está no inventário). O "problema" é o caso real (ex.: Fibra 01 – ETE), guardado no inventário do cliente.
+      const CAUSAS = [
+        ["diag", "—", "A diagnosticar"], ["fibra", "Infraestrutura de rede", "Fibra rompida"], ["cabo", "Infraestrutura de rede", "Cabo de rede rompido"], ["switch", "Infraestrutura de rede", "Switch / PoE com defeito"], ["radio", "Infraestrutura de rede", "Rádio / antena"], ["conector", "Infraestrutura de rede", "Conector / patch cord"],
+        ["alim", "Energia", "Falta de alimentação"], ["fonte", "Energia", "Fonte queimada"], ["nobreak", "Energia", "Nobreak / estabilizador"], ["disjuntor", "Energia", "Disjuntor desarmado"],
+        ["defeito", "Dispositivo", "Dispositivo com defeito (troca)"], ["lente", "Dispositivo", "Lente / visão comprometida"],
+        ["ip", "Configuração", "IP em conflito / rede"], ["senha", "Configuração", "Senha / usuário"], ["firmware", "Configuração", "Firmware"], ["canal", "Configuração", "Canal mal configurado no NVR"],
+        ["hd", "Gravação", "HD cheio ou com defeito"], ["nvr", "Gravação", "NVR / DVR travado ou com defeito"],
+        ["obra", "Externo", "Obra no local"], ["desligado", "Externo", "Desligado pelo cliente"], ["vandal", "Externo", "Vandalismo"], ["removido", "Externo", "Dispositivo removido"], ["outro", "Outros", "Outro"],
+      ].map(([id, g, n]) => ({ id, g, n }));
+      const nomeCausa = (id) => (CAUSAS.find((x) => x.id === id) || CAUSAS[0]).n;
+      function campoCausa(b, c) {
+        const sel = fSel(b + ".causa", "Causa do problema", CAUSAS.map((x) => [x.id, x.g === "—" ? x.n : `${x.g} · ${x.n}`]));
+        const ci = c && S.invCli[c.id];
+        if (!ci || !ci.temMeta) return sel;
+        const atual = val(b + ".problemaId") || "";
+        const probs = (ci.probs || []).filter((x) => x.status !== "resolvido" || x.id === atual);
+        return sel + fSel(b + ".problemaId", "Faz parte do problema (opcional)", [["", "— nenhum —"], ...probs.map((x) => [x.id, x.nome + (x.status === "resolvido" ? " (resolvido)" : "")]), ["__novo", "+ novo problema…"]]);
+      }
+      // cria um problema novo no inventário do cliente (a partir da pendência)
+      async function criaProblema(c, nome, causa) {
+        const meta = await DB.get("inventarioMeta", c.id);
+        if (!meta) throw new Error("o cliente não tem inventário");
+        const x = { id: uid(), causa: causa || "diag", nome, status: "aberto", obs: "", localId: "", localTag: "", criadoEm: hoje(), criadoPor: S.me.nome || "", atualizadoEm: bd(hoje()), atualizadoPor: S.me.nome || "" };
+        meta.problemas = [...(meta.problemas || []), x];
+        await DB.set("inventarioMeta", c.id, meta);
+        const ci = S.invCli[c.id];
+        if (ci) ci.probs = [...(ci.probs || []), x];
+        if (DB.audit) DB.audit("registrou problema", "inventarioMeta", c.id, `${c.unidade || ""} · ${nome}`);
+        return x;
+      }
       const semAc = (x) => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       S.invCli = {}; // clienteId -> { itens: [...] } (dispositivos do inventário, carregados quando precisa)
       function invDoCliente(c) {
@@ -2161,7 +2191,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         S.invCli[c.id] = { itens: x ? x.itens : [], t: Date.now() };
         (async () => {
           try {
-            const [docs, cfg] = await Promise.all([DB.list("inventario", fCli(c)), DB.get("inventarioConfig", "geral").catch(() => null)]);
+            const [docs, cfg, meta] = await Promise.all([DB.list("inventario", fCli(c)), DB.get("inventarioConfig", "geral").catch(() => null), DB.get("inventarioMeta", c.id).catch(() => null)]);
             const mapa = (cfg && cfg.mapa) || {};
             S.invSel = (cfg && cfg.selecao) || {};
             const itens = [];
@@ -2170,8 +2200,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 itens.push({ id: it.id, sis: d.sistema, tag: it.tag || "", ip: it.ip || "", pav: it.pav || "", tipo: it.tipo || "", status: it.status || "", quadro: it.quadro || "", tipoCat: it.tipoCat || mapa[`${d.sistema}|${String(it.tipo || "").toUpperCase()}`] || "" }),
               ),
             );
-            const mudou = JSON.stringify(itens) !== JSON.stringify(S.invCli[c.id].itens) || !S.invCli[c.id].ok;
-            S.invCli[c.id] = { itens, t: Date.now(), ok: true };
+            const probs = ((meta && meta.problemas) || []).filter((x) => !x.excluido);
+            const mudou = JSON.stringify([itens, probs]) !== JSON.stringify([S.invCli[c.id].itens, S.invCli[c.id].probs]) || !S.invCli[c.id].ok;
+            S.invCli[c.id] = { itens, probs, temMeta: !!meta, t: Date.now(), ok: true };
             if (mudou) render();
           } catch (e) {
             console.warn("inventário do cliente", e.code || e.message);
@@ -2344,6 +2375,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           fSel(b + ".tipoId", "Tipo de equipamento (todos do catálogo)", [["", "— nenhum / assunto geral —"], ...S.cat.tipos.map((t) => [t.id, `${t.sis} · ${t.nome}`])]) +
           (c && c.eqs && c.eqs.length ? fSel(b + ".eqId", "Equipamento do cliente (opcional)", eqOpcoes(c)) : "") +
           (dsp.inp ? `<div class="g">${dsp.inp}${soSolucao ? "" : dsp.sit}</div>` : "") +
+          (soSolucao ? "" : `<div class="g">${campoCausa(b, c)}</div>`) +
           fTa(b + ".problema", "Problema reportado", { rows: 2 }) +
           fTa(b + ".diag", "Diagnóstico", { rows: 2 });
         const ac = fTa(b + ".acoes", "Ações executadas (uma por linha)", { lines: true, rows: 3 });
@@ -2351,7 +2383,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const ob = fTa(b + ".obs", "Observação técnica", { rows: 2 }) + fTa(b + ".texto", "Texto livre (opcional)", { rows: 2 });
         const st = semStatus ? "" : fIn(b + ".status", "Status", { list: "dlStatus" });
         // quem conclui a pendência de outro técnico escreve ações, solução, observação e texto livre; o resto fica travado
-        return soSolucao ? ro(a1, false) + (dsp.sit ? `<div class="g">${dsp.sit}</div>` : "") + ac + sol + ob + ro(st, false) : a1 + ac + sol + ob + st;
+        return soSolucao ? ro(a1, false) + `<div class="g">${dsp.sit || ""}${campoCausa(b, c)}</div>` + ac + sol + ob + ro(st, false) : a1 + ac + sol + ob + st;
       };
       function vCliPend(modo = "abertas") {
         const conc = modo === "concluidas",
@@ -2377,7 +2409,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const sub = !dentro && e && tit.trim().toLowerCase() !== rot.trim().toLowerCase() ? `<span class="sm sub">${esc(tit)}</span>` : "";
           return `<details class="eq"${p.id === S.pcAberto ? " open" : ""}>
     <summary><b class="rd">${esc(rot)}</b> <span class="chip ${p.aberta ? "red" : "ok"}">${p.aberta ? "Em aberto · " + idadeTxt(p.criada).replace("aberta ", "") : "Concluída " + bd(p.concluidaEm)}</span>${sub}</summary>
-    <div class="sm" style="margin:6px 0">Aberta${p.criadaPorNome ? " por " + esc(p.criadaPorNome) : ""} em ${bd(p.criada)}${p.status ? " · " + esc(p.status) : ""}${p.dispId ? ` · Dispositivo: <b>${esc(p.dispTag || p.dispId)}</b>${p.dispStatus ? ` (${esc(p.dispStatus)})` : ""}` : ""}</div>
+    <div class="sm" style="margin:6px 0">Aberta${p.criadaPorNome ? " por " + esc(p.criadaPorNome) : ""} em ${bd(p.criada)}${p.status ? " · " + esc(p.status) : ""}${p.dispId ? ` · Dispositivo: <b>${esc(p.dispTag || p.dispId)}</b>${p.dispStatus ? ` (${esc(p.dispStatus)})` : ""}` : ""}${p.causa && p.causa !== "diag" ? ` · Causa: <b>${esc(nomeCausa(p.causa))}</b>` : ""}${p.problemaNome ? ` · Problema: <b>${esc(p.problemaNome)}</b>` : ""}</div>
     ${full ? "" : '<p class="sm">Você pode preencher ações executadas, solução proposta, observação técnica e texto livre, e concluir. O restante só quem abriu, o supervisor e o admin alteram.</p>'}
     ${itemFields(`pc.${i}`, false, !full, c)}
     ${(p.historico || []).length ? `<details class="hist"><summary>Histórico de alterações (${p.historico.length})</summary>${[...p.historico].sort((x, y) => (x.ts || 0) - (y.ts || 0) || String(x.data || "").localeCompare(String(y.data || ""))).map((h) => `<div class="hl"><b>${bd(h.data)}${h.hora ? " " + esc(h.hora) : ""}</b> · ${esc(h.status || "")}${h.por ? " · " + esc(h.por) : ""}${(h.alt || []).map((a) => `<div class="sm hlc"><i>${esc(a.c)}:</i> ${a.de ? "<s>" + esc(legHist(a.c, a.de)) + "</s> para " : ""}${esc(legHist(a.c, a.para)) || "(vazio)"}</div>`).join("")}</div>`).join("")}</details>` : ""}
@@ -3867,6 +3899,35 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           }
         }
         if (/^cli\.eqs\.\d+\.tipo$/.test(p)) setPath(p.replace(/tipo$/, "perfil"), 0);
+        if (/\.problemaId$/.test(p)) {
+          const b = p.replace(/\.problemaId$/, ""),
+            cl = p.startsWith("pc.") ? S.cli : S.vcli;
+          if (v === "__novo") {
+            setPath(p, "");
+            const nome = (prompt("Nome do problema (ex.: Fibra 01 – ETE, Falta de energia no rack do 2º andar):") || "").trim();
+            if (nome)
+              criaProblema(cl, nome, val(b + ".causa"))
+                .then((x) => {
+                  setPath(p, x.id);
+                  setPath(b + ".problemaNome", x.nome);
+                  if (!val(b + ".causa") || val(b + ".causa") === "diag") setPath(b + ".causa", x.causa);
+                  if (p.startsWith("pc.")) S.pcAberto = S.pc[+p.split(".")[1]].id;
+                  afterChange(p);
+                  render();
+                  toast("Problema criado");
+                })
+                .catch((e) => toast("Não consegui criar o problema: " + (e.code === "permission-denied" ? "sem permissão" : e.code || e.message)));
+            else render();
+            return;
+          }
+          const pr = ((S.invCli[cl && cl.id] || {}).probs || []).find((x) => x.id === v);
+          setPath(b + ".problemaNome", pr ? pr.nome : "");
+          if (pr && (!val(b + ".causa") || val(b + ".causa") === "diag")) setPath(b + ".causa", pr.causa);
+          if (p.startsWith("pc.")) S.pcAberto = S.pc[+p.split(".")[1]].id;
+          afterChange(p);
+          render();
+          return;
+        }
         // marcou "Concluída nesta visita" / "Resolvido nesta visita": oferece voltar o dispositivo para ONLINE
         if (v === true && /^visit\.(pend\.\d+\.concluir|itens\.\d+\.resolvido)$/.test(p) && perguntaOnline(val(p.replace(/\.\w+$/, "")), S.vcli && S.vcli.id)) {
           afterChange(p);
@@ -4202,7 +4263,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           toast("Não consegui abrir a visita.");
         }
       }
-      const CAMPOS_PEND = [["titulo","Equipamento / assunto"],["tipoId","Tipo"],["eqId","Equipamento do cliente"],["problema","Problema reportado"],["diag","Diagnóstico"],["acoes","Ações executadas"],["solucao","Solução proposta"],["obs","Observação técnica"],["texto","Texto livre"],["status","Status"],["dispTag","Dispositivo do inventário"],["dispStatus","Situação do dispositivo"]];
+      const CAMPOS_PEND = [["titulo","Equipamento / assunto"],["tipoId","Tipo"],["eqId","Equipamento do cliente"],["problema","Problema reportado"],["diag","Diagnóstico"],["acoes","Ações executadas"],["solucao","Solução proposta"],["obs","Observação técnica"],["texto","Texto livre"],["status","Status"],["dispTag","Dispositivo do inventário"],["dispStatus","Situação do dispositivo"],["causa","Causa"],["problemaNome","Problema"]];
       const vTxt = (v) => (Array.isArray(v) ? v.join("; ") : v == null ? "" : String(v)).trim();
       // no histórico, tipo e equipamento aparecem pelo nome (não pelo código interno)
       const nomeTipo = (id) => {
@@ -4213,11 +4274,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const e = id && [...((S.cli && S.cli.eqs) || []), ...((S.vcli && S.vcli.eqs) || [])].find((x) => x.id === id);
         return e ? nmEq(e) : id || "";
       };
-      const legHist = (c, v) => (c === "Tipo" ? nomeTipo(v) : c === "Equipamento do cliente" ? nomeEqId(v) : v);
+      const legHist = (c, v) => (c === "Tipo" ? nomeTipo(v) : c === "Equipamento do cliente" ? nomeEqId(v) : c === "Causa" && CAUSAS.some((x) => x.id === v) ? nomeCausa(v) : v);
       const difPend = (a, b) => {
         const r = [];
         CAMPOS_PEND.forEach(([k, n]) => {
-          const f = k === "tipoId" ? nomeTipo : k === "eqId" ? nomeEqId : (z) => z;
+          const f = k === "tipoId" ? nomeTipo : k === "eqId" ? nomeEqId : k === "causa" ? (z) => (z ? nomeCausa(z) : "") : (z) => z;
           const x = vTxt(f(a && a[k])), y = vTxt(f(b && b[k]));
           if (x !== y) r.push({ c: n, de: x.slice(0, 160), para: y.slice(0, 160) });
         });
@@ -4235,7 +4296,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         }
         gravar("pendencias", p.id, semTransitorios(p));
       }
-      const dispDe = (it) => ({ dispId: it.dispId || "", dispSis: it.dispSis || "", dispTag: it.dispTag || "", dispIp: it.dispIp || "", dispPav: it.dispPav || "", dispStatus: it.dispStatus || "" });
+      const dispDe = (it) => ({ dispId: it.dispId || "", dispSis: it.dispSis || "", dispTag: it.dispTag || "", dispIp: it.dispIp || "", dispPav: it.dispPav || "", dispStatus: it.dispStatus || "", causa: it.causa || "diag", problemaId: it.problemaId || "", problemaNome: it.problemaNome || "" });
       const pushHist = (p, e) => {
         p.historico = (p.historico || []).filter((h) => h.visitaId !== e.visitaId);
         p.historico.push(e);
@@ -4279,6 +4340,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               const antes = baseP(cur);
               ["acoes", "solucao", "obs", "texto"].forEach((k) => (cur[k] = p[k]));
               if (cur.dispId && p.dispStatus !== undefined) cur.dispStatus = p.dispStatus;
+              ["causa", "problemaId", "problemaNome"].forEach((k) => p[k] !== undefined && (cur[k] = p[k]));
               const dif = difPend(antes, cur);
               if (p.concluir && cur.aberta) {
                 cur.aberta = false;
