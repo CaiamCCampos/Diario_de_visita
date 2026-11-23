@@ -1194,12 +1194,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const uso = manual ? +it.emUso || 0 : au ? au.n : null;
         if (!cap && !au && !manual) return null;
         const pc = cap && uso !== null ? Math.round((uso / cap) * 100) : null;
-        return { cap, unid: it.capUnid || sugereUnid(sis, it), uso, auto: !manual && !!au, manual, contado: au ? au.n : null, au, livres: cap && uso !== null ? cap - uso : null, pct: pc, nivel: pc === null ? "" : pc > 100 ? "acima" : pc >= 90 ? "cheio" : pc >= 75 ? "alto" : "ok" };
+        return { cap, unid: it.capUnid || sugereUnid(sis, it), uso, auto: !manual && !!au, manual, contado: au ? au.n : null, au, livres: cap && uso !== null ? cap - uso : null, pct: pc, nivel: pc === null ? "" : cap && uso !== null && uso > cap ? "acima" : cap && uso !== null && uso === cap ? "maximo" : pc >= 90 ? "cheio" : pc >= 75 ? "alto" : "ok" };
       }
       const barraCap = (c) =>
         !c || c.pct === null
           ? ""
-          : `<div style="background:#eee;border-radius:6px;height:8px;overflow:hidden;min-width:80px"><div style="height:8px;width:${Math.min(c.pct, 100)}%;background:${c.nivel === "acima" || c.nivel === "cheio" ? "#C00000" : c.nivel === "alto" ? "#E0A100" : "#2E7D32"}"></div></div>`;
+          : `<div style="background:#eee;border-radius:6px;height:8px;overflow:hidden;min-width:80px"><div style="height:8px;width:${Math.min(c.pct, 100)}%;background:${c.nivel === "acima" || c.nivel === "maximo" || c.nivel === "cheio" ? "#C00000" : c.nivel === "alto" ? "#E0A100" : "#2E7D32"}"></div></div>`;
       const txtCap = (c) => (!c ? "" : c.cap ? `${c.uso === null ? "?" : c.uso} de ${c.cap} ${c.unid}${c.pct !== null ? ` (${c.pct}%)` : ""}${c.livres !== null ? ` · ${c.livres >= 0 ? c.livres + " livre(s)" : Math.abs(c.livres) + " acima da capacidade"}` : ""}` : `${c.uso} em uso · capacidade não informada`);
       const rotSis = (sis, k) => (sis === "SAI" ? { login: "Login master", senha: "Senha master", login2: "Login remoto", senha2: "Senha remota" }[k] : "") || ROT[k];
       const temAcesso2 = (sis) => sis === "SAI";
@@ -1598,6 +1598,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             const c = it.capacidade ? capInfo(inv, sis, it) : null;
             if (!c || c.pct === null) continue;
             if (c.nivel === "acima") L.push({ chave: `Acima da capacidade|${it.id}`, tipo: "Acima da capacidade", sis, ids: [it.id], tag: it.tag, texto: txtCap(c) });
+            else if (c.nivel === "maximo") L.push({ chave: `Capacidade máxima atingida|${it.id}`, tipo: "Capacidade máxima atingida", sis, ids: [it.id], tag: it.tag, texto: txtCap(c) });
             else if (c.nivel === "cheio") L.push({ chave: `Capacidade quase no limite|${it.id}`, tipo: "Capacidade quase no limite", sis, ids: [it.id], tag: it.tag, texto: txtCap(c) });
           }
         const vistosImp = new Set();
@@ -1992,7 +1993,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const nPendAb = (S.pend || []).filter((p) => p.aberta).length;
         const nSemCat = al.filter((a) => a.tipo === "Tipo sem catálogo" && alertaAtivo(a)).length;
         const nProbAb = problemas().filter((x) => x.status !== "resolvido").length;
-        const nCapCheio = al.filter((a) => (a.tipo === "Acima da capacidade" || a.tipo === "Capacidade quase no limite") && alertaAtivo(a)).length;
+        const nCapCheio = al.filter((a) => (a.tipo === "Acima da capacidade" || a.tipo === "Capacidade máxima atingida" || a.tipo === "Capacidade quase no limite") && alertaAtivo(a)).length;
         const abas = [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))];
         const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "problemas" ? "on" : ""}" data-aba="problemas">Problemas${nProbAb ? ` <span class="chip red">${nProbAb}</span>` : ""}</button><button class="${S.aba === "capacidade" ? "on" : ""}" data-aba="capacidade">Capacidade${nCapCheio ? ` <span class="chip red">${nCapCheio}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
         const corpo = S.aba === "problemas" ? vProblemas() : S.aba === "capacidade" ? vCapacidade() : S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
@@ -2491,7 +2492,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   <td>${c && c.livres !== null ? (c.livres < 0 ? `<span class="rd">${c.livres}</span>` : c.livres) : "—"}</td>
   <td style="min-width:110px">${c && c.pct !== null ? `<div class="sm">${c.pct}%</div>${barraCap(c)}` : "—"}</td></tr>`;
         });
-        return `<div class="kpis">${kp("Com capacidade informada", comCap.length)}${kp("Acima de 90%", comCap.filter((x) => ["cheio", "acima"].includes(x.c.nivel)).length, "red")}${cc ? kp("Canais de NVR em uso", `${cu}<span class="sm"> de ${cc}</span>`) + kp("Canais livres", cc - cu, "ok") : ""}</div>
+        return `<div class="kpis">${kp("Com capacidade informada", comCap.length)}${kp("Acima de 90%", comCap.filter((x) => ["cheio", "maximo", "acima"].includes(x.c.nivel)).length, "red")}${cc ? kp("Canais de NVR em uso", `${cu}<span class="sm"> de ${cc}</span>`) + kp("Canais livres", cc - cu, "ok") : ""}</div>
   <div class="note" style="background:#f6f6f7">Capacidade de NVRs, centrais, switches, controladoras e o que mais precisar. Deixe em branco nos dispositivos unitários (câmeras, sensores). O <b>em uso</b> é contado sozinho no NVR (câmeras com aquele NVR), no switch/quadro (dispositivos ligados a ele) e na central do SDAI. Se a contagem não bater com o real, digite o número certo: o valor digitado vale mais que a contagem (apague para voltar a contar).</div>
   <div class="filtros"><div><label>Buscar</label><input data-f="fCap" value="${esc(S.fCap || "")}" placeholder="TAG, tipo, modelo"></div><div><label class="k" style="margin:0 0 6px"><input type="checkbox" data-f="capTodos"${S.capTodos ? " checked" : ""}> Mostrar todos os dispositivos</label></div></div>
   <div class="tblw"><table class="tbl"><thead><tr><th>Sistema</th><th>ID</th><th>Dispositivo</th><th>Capacidade</th><th>Unidade</th><th>Em uso</th><th>Livres</th><th>Ocupação</th></tr></thead><tbody>${lin.join("") || '<tr><td colspan="8" class="sm">Nenhum equipamento com capacidade. Marque "Mostrar todos os dispositivos" para incluir.</td></tr>'}</tbody></table></div>

@@ -307,7 +307,7 @@ const FERRAMENTAS = [
         })
         .filter(Boolean);
       const nv = L.filter((x) => x.unidade === "canais" && typeof x.capacidade === "number" && x.livres !== null);
-      return { cliente: cli.nome, equipamentos: L, acima_de_90_pct: L.filter((x) => x.ocupacao_pct >= 90).map((x) => x.equipamento), canais_de_nvr: nv.length ? { capacidade: nv.reduce((a, x) => a + x.capacidade, 0), em_uso: nv.reduce((a, x) => a + x.em_uso, 0), livres: nv.reduce((a, x) => a + x.livres, 0) } : undefined };
+      return { cliente: cli.nome, equipamentos: L, capacidade_maxima_atingida: L.filter((x) => x.livres === 0).map((x) => x.equipamento), acima_da_capacidade: L.filter((x) => x.livres < 0).map((x) => x.equipamento), acima_de_90_pct: L.filter((x) => x.ocupacao_pct >= 90).map((x) => x.equipamento), canais_de_nvr: nv.length ? { capacidade: nv.reduce((a, x) => a + x.capacidade, 0), em_uso: nv.reduce((a, x) => a + x.em_uso, 0), livres: nv.reduce((a, x) => a + x.livres, 0) } : undefined };
     },
   },
   {
