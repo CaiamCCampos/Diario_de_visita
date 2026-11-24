@@ -1748,8 +1748,17 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             const o = l.slice().sort((a, b) => !!a.desconsiderada - !!b.desconsiderada || pesoPend(b) - pesoPend(a) || String(a.criada).localeCompare(String(b.criada)));
             return { fica: o[0], sai: o.slice(1) };
           });
-        return { orfas, dup };
+        // dispositivo sem rede (OFFLINE/FALHA) sem nenhuma pendência aberta
+        const comPend = new Set(ab.filter((p) => !p.desconsiderada).map((p) => p.dispId));
+        const semPend = [];
+        Object.entries(S.inv).forEach(([sis, d]) => (d.itens || []).forEach((it) => SEM_REDE.includes(it.status) && !comPend.has(it.id) && semPend.push([sis, it])));
+        // pendência com a TAG antiga do dispositivo (TAG trocada fora da ficha, ex.: pela planilha)
+        const tagDe = new Map();
+        Object.values(S.inv).forEach((d) => (d.itens || []).forEach((i) => tagDe.set(i.id, i.tag || "")));
+        const tagVelha = ab.filter((p) => !p.desconsiderada && ids.has(p.dispId) && tagDe.get(p.dispId) && (p.dispTag || "") !== tagDe.get(p.dispId));
+        return { orfas, dup, semPend, tagVelha, tagDe };
       }
+      const nArrumar = (D) => D.orfas.length + D.dup.reduce((a, d) => a + d.sai.length, 0) + D.semPend.length + D.tagVelha.length;
       // apaga as órfãs e junta as duplicadas na que tem mais informação (as ações e o histórico das outras vão junto)
       async function arrumaPend(D = diagPend(), silencioso = false) {
         let n = 0;
@@ -1772,7 +1781,24 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           for (const x of sai) await DB.del("pendencias", x.id).catch((e) => console.warn("duplicada", x.id, e.code || e.message));
           n += sai.length;
         }
-        if (n) audita("arrumou pendências", "pendencias", S.cliId, `${cliNome(S.cliId)} · ${D.orfas.length} sem dispositivo, ${D.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s)`);
+        // TAG nova nas pendências do dispositivo (o título também, se era a TAG antiga ou se a pendência é automática)
+        for (const p of D.tagVelha) {
+          if (D.orfas.includes(p) || D.dup.some((d) => d.sai.includes(p))) continue;
+          const nova = D.tagDe.get(p.dispId),
+            q = { ...p, dispTag: nova };
+          if (!p.titulo || p.titulo === p.dispTag || p.origem === "inventário") q.titulo = nova;
+          const d1 = new Date();
+          q.historico = [...(p.historico || []), { data: hoje(), hora: `${pad(d1.getHours())}:${pad(d1.getMinutes())}`, ts: Date.now(), status: "Atualizada", por: meuNome() + " (inventário)", alt: [{ c: "Dispositivo do inventário", de: p.dispTag || "", para: nova }] }];
+          await DB.set("pendencias", p.id, q).catch((e) => console.warn("tag", p.id, e.code || e.message));
+          n++;
+        }
+        // dispositivo sem rede sem pendência: abre (ou reabre a desconsiderada)
+        if (D.semPend.length) {
+          const inv = {};
+          D.semPend.forEach(([sis, it]) => (inv[sis] = inv[sis] || { itens: [] }).itens.push(it));
+          n += await abrePendOffline(S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId }, inv, S.inv);
+        }
+        if (n) audita("arrumou pendências", "pendencias", S.cliId, `${cliNome(S.cliId)} · ${D.orfas.length} sem dispositivo, ${D.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s), ${D.semPend.length} sem pendência, ${D.tagVelha.length} com TAG antiga`);
         if (!silencioso) toast(n ? `${n} pendência(s) arrumada(s)` : "Nada para arrumar");
         return n;
       }
@@ -2571,9 +2597,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   })()}` : '<div class="sm" style="color:var(--d)">Sem dispositivo ligado. No diário, escolha o dispositivo na pendência (campo "Dispositivo do inventário").</div>'}</div>`;
         };
         const DP = diagPend(),
-          nArr = DP.orfas.length + DP.dup.reduce((a, d) => a + d.sai.length, 0);
+          nArr = nArrumar(DP);
         const avisoArr = nArr
-          ? `<div class="card" style="border:1px solid #c47a00;background:#fff6e0"><b>Pendências para arrumar</b><div class="sm" style="margin:4px 0 8px">${DP.dup.length ? `${DP.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s) — mesmo dispositivo com mais de uma pendência automática (aberta pelo inventário): ${DP.dup.map((d) => esc(d.fica.dispTag || d.fica.titulo)).slice(0, 12).join(", ")}${DP.dup.length > 12 ? "…" : ""}. ` : ""}${DP.orfas.length ? `${DP.orfas.length} de dispositivo(s) que não existe(m) mais no inventário: ${DP.orfas.map((p) => esc(p.dispTag || p.titulo)).slice(0, 12).join(", ")}${DP.orfas.length > 12 ? "…" : ""}.` : ""}</div>${ehAdmin() ? `<button class="b s" data-a="arrumaPend" style="margin:0">Arrumar agora</button> <span class="sm">As duplicadas viram uma só (fica a que tem causa/problema/ações, e o resto é juntado nela); as sem dispositivo são apagadas. Pendências escritas no diário nunca são juntadas.</span>` : '<span class="sm">Peça ao administrador para arrumar.</span>'}</div>`
+          ? `<div class="card" style="border:1px solid #c47a00;background:#fff6e0"><b>Pendências para arrumar</b><div class="sm" style="margin:4px 0 8px">${DP.dup.length ? `${DP.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s) — mesmo dispositivo com mais de uma pendência automática (aberta pelo inventário): ${DP.dup.map((d) => esc(d.fica.dispTag || d.fica.titulo)).slice(0, 12).join(", ")}${DP.dup.length > 12 ? "…" : ""}. ` : ""}${DP.orfas.length ? `${DP.orfas.length} de dispositivo(s) que não existe(m) mais no inventário: ${DP.orfas.map((p) => esc(p.dispTag || p.titulo)).slice(0, 12).join(", ")}${DP.orfas.length > 12 ? "…" : ""}. ` : ""}${DP.semPend.length ? `${DP.semPend.length} dispositivo(s) sem rede sem pendência: ${DP.semPend.map(([, it]) => esc(it.tag || it.id)).slice(0, 12).join(", ")}${DP.semPend.length > 12 ? "…" : ""}. ` : ""}${DP.tagVelha.length ? `${DP.tagVelha.length} pendência(s) com a TAG antiga: ${DP.tagVelha.map((p) => esc((p.dispTag || p.titulo) + " → " + DP.tagDe.get(p.dispId))).slice(0, 8).join(", ")}.` : ""}</div>${ehAdmin() ? `<button class="b s" data-a="arrumaPend" style="margin:0">Arrumar agora</button> <span class="sm">As duplicadas viram uma só (fica a que tem causa/problema/ações, e o resto é juntado nela); as sem dispositivo são apagadas. Pendências escritas no diário nunca são juntadas.</span>` : '<span class="sm">Peça ao administrador para arrumar.</span>'}</div>`
           : "";
         return `${avisoArr}<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
   <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Dispositivo que fica OFFLINE ou em FALHA no inventário abre uma pendência automaticamente; se ele for marcado como VAZIO, a pendência é desconsiderada. A conclusão é sempre feita no diário.</div>
@@ -3653,8 +3679,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         },
         async arrumaPend() {
           const D = diagPend();
-          const n = D.orfas.length + D.dup.reduce((a, d) => a + d.sai.length, 0);
-          if (!n || !confirm(`Arrumar ${n} pendência(s)?\n\n• ${D.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s) serão juntadas na pendência que já tem causa/problema/ações\n• ${D.orfas.length} de dispositivo(s) que não existe(m) mais serão apagadas\n\nNão dá para desfazer.`)) return;
+          const n = nArrumar(D);
+          if (!n || !confirm(`Arrumar ${n} item(ns)?\n\n• ${D.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s) serão juntadas na que já tem causa/problema/ações\n• ${D.orfas.length} de dispositivo(s) que não existe(m) mais serão apagadas\n• ${D.semPend.length} dispositivo(s) sem rede vão ganhar pendência\n• ${D.tagVelha.length} pendência(s) passam a mostrar a TAG atual\n\nApagar e juntar não dá para desfazer.`)) return;
           await arrumaPend(D);
         },
         async excluiInv() {
