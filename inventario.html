@@ -2258,7 +2258,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         return `<div class="sm"><b>${esc(it.id)}</b>${leg[sis + "|" + it.tipo] ? " · " + esc(leg[sis + "|" + it.tipo]) : ""}${it.origem ? " · veio de " + esc(it.origem) : ""}</div>
   <div class="g">${camposSis(sis).map(campo).join("")}</div>
   ${vItemQuadro(sis, it, ed)}${vItemCap(sis, it, ed)}
-  <div class="g">${acessos}</div>${vItemCat(sis, it)}${vItemDetalhes(sis, it)}${vItemPend(it)}
+  ${edA ? `<div class="g">${acessos}</div>` : ""}${vItemCat(sis, it)}${vItemDetalhes(sis, it)}${vItemPend(it)}
   <label>Observação</label><textarea id="e_obs" rows="2"${ed ? "" : " readonly"}>${esc(it.obs || "")}</textarea>
   ${it.statusOrigem ? `<div class="sm" style="margin-top:6px">Situação <b>${esc(it.statusOrigem.depois || it.status)}</b> marcada pelo diário em ${esc(it.statusOrigem.em || "")}${it.statusOrigem.por ? " por " + esc(it.statusOrigem.por) : ""}${it.statusOrigem.antes ? " (antes: " + esc(it.statusOrigem.antes) + ")" : ""}${it.statusOrigem.titulo ? " · pendência: " + esc(it.statusOrigem.titulo) : ""}</div>` : ""}
   <div class="sm" style="margin-top:6px">${it.verificado ? `<span class="ver">Senha confirmada em <b>${dh(it.verificado)}</b>${it.verificadoPor ? " por " + esc(it.verificadoPor) : ""}</span>` : temSenha(credDe(sis, it, S.aces)) ? '<span class="st FALHA">Senha a confirmar</span>' : "Sem login/senha cadastrados."}${it.alteradoEm ? ` · última alteração em ${esc(it.alteradoEm)}${it.alteradoPor ? " por " + esc(it.alteradoPor) : ""}` : ""}</div>
