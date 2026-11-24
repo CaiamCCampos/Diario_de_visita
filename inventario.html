@@ -1728,6 +1728,53 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           }
         return ids.slice(0, 6);
       }
+      /* ---- um dispositivo = uma pendência aberta; dispositivo excluído = pendência some ----
+         órfãs: pendência aberta (ou desconsiderada) com dispositivo de um sistema carregado que não existe mais no inventário;
+         duplicadas: mais de uma pendência aberta (não desconsiderada) para o mesmo dispositivo. */
+      const pesoPend = (p) => (p.problemaId ? 8 : 0) + (p.causa && p.causa !== "diag" ? 4 : 0) + ((p.acoes || []).length || p.diag || p.solucao ? 2 : 0) + (p.historico || []).length / 100;
+      function diagPend() {
+        const ids = new Set(),
+          sisCarregados = new Set(Object.keys(S.inv).map((k) => semAcento(k).toUpperCase()));
+        Object.values(S.inv).forEach((d) => (d.itens || []).forEach((i) => ids.add(i.id)));
+        const ab = (S.pend || []).filter((p) => p.aberta && p.dispId);
+        const orfas = ab.filter((p) => !ids.has(p.dispId) && (!p.dispSis || sisCarregados.has(semAcento(p.dispSis).toUpperCase())));
+        const porDisp = new Map();
+        ab.filter((p) => ids.has(p.dispId)).forEach((p) => (porDisp.get(p.dispId) || porDisp.set(p.dispId, []).get(p.dispId)).push(p));
+        // fica uma pendência por dispositivo: a aberta com mais informação; desconsiderada só fica se for a única
+        const dup = [...porDisp.values()]
+          .filter((l) => l.length > 1 && l.some((p) => !p.desconsiderada))
+          .map((l) => {
+            const o = l.slice().sort((a, b) => !!a.desconsiderada - !!b.desconsiderada || pesoPend(b) - pesoPend(a) || String(a.criada).localeCompare(String(b.criada)));
+            return { fica: o[0], sai: o.slice(1) };
+          });
+        return { orfas, dup };
+      }
+      // apaga as órfãs e junta as duplicadas na que tem mais informação (as ações e o histórico das outras vão junto)
+      async function arrumaPend(D = diagPend(), silencioso = false) {
+        let n = 0;
+        for (const p of D.orfas) {
+          await DB.del("pendencias", p.id).catch((e) => console.warn("órfã", p.id, e.code || e.message));
+          n++;
+        }
+        for (const { fica, sai } of D.dup) {
+          const f = clone(fica);
+          for (const x of sai) {
+            if ((!f.causa || f.causa === "diag") && x.causa && x.causa !== "diag") f.causa = x.causa;
+            if (!f.problemaId && x.problemaId) Object.assign(f, { problemaId: x.problemaId, problemaNome: x.problemaNome });
+            ["diag", "solucao", "obs", "texto"].forEach((k) => !f[k] && x[k] && (f[k] = x[k]));
+            if ((x.acoes || []).length) f.acoes = [...new Set([...(f.acoes || []), ...x.acoes])];
+            if (String(x.criada || "") < String(f.criada || "")) f.criada = x.criada; // vale a data mais antiga
+          }
+          const d0 = new Date();
+          f.historico = [...(f.historico || []), { data: hoje(), hora: `${pad(d0.getHours())}:${pad(d0.getMinutes())}`, ts: Date.now(), status: "Atualizada", por: meuNome() + ` (juntou ${sai.length} pendência(s) duplicada(s) do mesmo dispositivo)` }];
+          await DB.set("pendencias", f.id, f);
+          for (const x of sai) await DB.del("pendencias", x.id).catch((e) => console.warn("duplicada", x.id, e.code || e.message));
+          n += sai.length;
+        }
+        if (n) audita("arrumou pendências", "pendencias", S.cliId, `${cliNome(S.cliId)} · ${D.orfas.length} sem dispositivo, ${D.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s)`);
+        if (!silencioso) toast(n ? `${n} pendência(s) arrumada(s)` : "Nada para arrumar");
+        return n;
+      }
       // mapa dispositivo → pendências, refeito só quando as pendências ou o inventário mudam
       let cachePend = { k: null, m: new Map() };
       function mapaPend() {
@@ -2119,7 +2166,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const cli = S.clientes.find((c) => c.id === S.cliId) || { unidade: S.meta ? S.meta.clienteNome : "Cliente" };
         const m = S.meta;
         if (!m && !Object.keys(S.inv).length)
-          return `<div class="card"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3 style="margin-top:10px">${esc(cli.unidade)}</h3><p class="sm">Este cliente ainda não tem inventário. Importe a planilha ou cadastre os dispositivos um a um.</p>${pode("inv.importar") ? `<button class="b" data-a="impCli" data-id="${esc(S.cliId)}">Importar planilha</button>` : ""}${pode("inv.novo") ? `<button class="b o" data-a="criaCat" data-id="${esc(S.cliId)}">Criar pelo catálogo</button><button class="b o" data-a="novoItem" data-sis="CFTV">Cadastrar dispositivo</button>` : ""}</div>${S.criaCat ? vCriaCat() : ""}${S.novo ? vNovo() : ""}`;
+          return `<div class="card"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3 style="margin-top:10px">${esc(cli.unidade)}</h3><p class="sm">Este cliente ainda não tem inventário. Importe a planilha ou cadastre os dispositivos um a um.</p>${pode("inv.importar") ? `<button class="b" data-a="impCli" data-id="${esc(S.cliId)}">Importar planilha</button>` : ""}${pode("inv.novo") ? `<button class="b o" data-a="criaCat" data-id="${esc(S.cliId)}">Criar pelo catálogo</button><button class="b o" data-a="novoItem" data-sis="CFTV">Cadastrar dispositivo</button>` : ""}</div>${S.criaCat || S.novo ? `<div class="aux">${S.criaCat ? vCriaCat() : ""}${S.novo ? vNovo() : ""}</div>` : ""}`;
         const al = calcAlertas(S.inv, m),
           alAt = al.filter(alertaAtivo).length;
         const r = resumo(S.inv, m, S.aces);
@@ -2137,7 +2184,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   ${pode("inv.novo") ? `<button class="b s" data-a="novoItem" data-sis="${esc(S.inv[S.aba] ? S.aba : "")}">+ Adicionar dispositivo</button><button class="b o s" data-a="criaCat" data-id="${esc(S.cliId)}">+ Pelo catálogo</button>` : ""}${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
   <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
   <div class="kpis"><div class="kpi"><div class="r">Dispositivos</div><div class="n">${r.total}</div></div><div class="kpi ok"><div class="r">Disponibilidade</div><div class="n">${String(disp).replace(".", ",")}%</div></div><div class="kpi am"><div class="r">Falha</div><div class="n">${r.status.FALHA || 0}</div></div><div class="kpi red"><div class="r">Offline</div><div class="n">${r.status.OFFLINE || 0}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${r.senhasPend}</div></div><div class="kpi ok"><div class="r">Senhas confirmadas</div><div class="n">${r.verificados}<span class="sm"> de ${r.comSenha}</span></div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${alAt}</div></div></div>
-  ${S.criaCat ? vCriaCat() : ""}${S.novo ? vNovo() : ""}${tabs}<div class="aux">${corpo}</div>`;
+  ${tabs}<div class="aux">${S.criaCat ? vCriaCat() : ""}${S.novo ? vNovo() : ""}${corpo}</div>`; // formulários dentro da área que rola
       }
       /* ---- criar inventário a partir do Catálogo do diário: escolhe os tipos e quantidades (e os equipamentos já
          cadastrados no cliente, no diário), e o sistema gera os dispositivos já ligados ao tipo do catálogo ---- */
@@ -2522,7 +2569,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
     return `<div class="sm" style="margin-top:4px"><b>Quadro de distribuição:</b> ${lig.length} dispositivo(s) ligado(s), ${sr.length} sem rede${sr.length ? `<div class="ids">${sr.map((x) => `<a data-a="vaiItem" data-id="${esc(x.it.id)}">${esc(x.it.tag || x.it.id)}</a>`).join("")}</div>` : ""}</div>`;
   })()}` : '<div class="sm" style="color:var(--d)">Sem dispositivo ligado. No diário, escolha o dispositivo na pendência (campo "Dispositivo do inventário").</div>'}</div>`;
         };
-        return `<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
+        const DP = diagPend(),
+          nArr = DP.orfas.length + DP.dup.reduce((a, d) => a + d.sai.length, 0);
+        const avisoArr = nArr
+          ? `<div class="card" style="border:1px solid #c47a00;background:#fff6e0"><b>Pendências para arrumar</b><div class="sm" style="margin:4px 0 8px">${DP.dup.length ? `${DP.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s) — mesmo dispositivo com mais de uma pendência aberta: ${DP.dup.map((d) => esc(d.fica.dispTag || d.fica.titulo)).slice(0, 12).join(", ")}${DP.dup.length > 12 ? "…" : ""}. ` : ""}${DP.orfas.length ? `${DP.orfas.length} de dispositivo(s) que não existe(m) mais no inventário: ${DP.orfas.map((p) => esc(p.dispTag || p.titulo)).slice(0, 12).join(", ")}${DP.orfas.length > 12 ? "…" : ""}.` : ""}</div>${ehAdmin() ? `<button class="b s" data-a="arrumaPend" style="margin:0">Arrumar agora</button> <span class="sm">As duplicadas viram uma só (fica a que tem causa/problema/ações, e o resto é juntado nela); as sem dispositivo são apagadas.</span>` : '<span class="sm">Peça ao administrador para arrumar.</span>'}</div>`
+          : "";
+        return `${avisoArr}<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
   <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Dispositivo que fica OFFLINE ou em FALHA no inventário abre uma pendência automaticamente; se ele for marcado como VAZIO, a pendência é desconsiderada. A conclusão é sempre feita no diário.</div>
   ${(() => {
     const todos = Object.values(S.inv).flatMap((d) => d.itens || []);
@@ -2815,7 +2867,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         if (!off.length) return 0;
         const f = cli.equipeId ? { clienteId: cli.id, equipeId: cli.equipeId } : { clienteId: cli.id };
         const todasP = await DB.list("pendencias", f);
-        const abertas = todasP.filter((p) => p.aberta);
+        const abertas = todasP.filter((p) => p.aberta && !p.desconsiderada); // desconsiderada é reaberta abaixo, não duplicada
         const ja = new Set(abertas.map((p) => p.dispId).filter(Boolean));
         const jaTag = new Set(abertas.filter((p) => !p.dispId).map((p) => semAcento(p.titulo || "").toUpperCase().trim()).filter(Boolean));
         const d0 = new Date(),
@@ -3401,7 +3453,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           }
           if (await salvaSistema(sis, ac)) {
             audita("excluiu dispositivo", "inventario", doc.id, `${cliNome(S.cliId)} · ${it.id} · ${it.tag}`);
-            toast("Dispositivo excluído");
+            const dele = (S.pend || []).filter((p) => p.aberta && p.dispId === it.id);
+            for (const p of dele) await DB.del("pendencias", p.id).catch((e) => console.warn("pendência", p.id, e.code || e.message));
+            toast("Dispositivo excluído" + (dele.length ? ` · ${dele.length} pendência(s) dele apagada(s)` : ""));
           }
         },
         criaCat(el) {
@@ -3410,6 +3464,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (S.view !== "cliente" || S.cliId !== id) abreCliente(id);
           else render();
           window.scrollTo({ top: 0, behavior: "smooth" });
+          setTimeout(() => document.querySelectorAll(".aux").forEach((a) => (a.scrollTop = 0)), 0); // o formulário fica no topo da área que rola
         },
         criaCatFecha() {
           S.criaCat = null;
@@ -3476,6 +3531,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           S.novo = { sis: (el && el.dataset.sis) || (S.inv[S.aba] ? S.aba : Object.keys(S.inv)[0] || "") };
           render();
           window.scrollTo({ top: 0, behavior: "smooth" });
+          setTimeout(() => document.querySelectorAll(".aux").forEach((a) => (a.scrollTop = 0)), 0); // o formulário fica no topo da área que rola
         },
         novoFecha() {
           S.novo = null;
@@ -3580,6 +3636,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           });
           if (await salvaMeta((m) => (m.legenda = leg))) toast("Legenda salva");
         },
+        async arrumaPend() {
+          const D = diagPend();
+          const n = D.orfas.length + D.dup.reduce((a, d) => a + d.sai.length, 0);
+          if (!n || !confirm(`Arrumar ${n} pendência(s)?\n\n• ${D.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s) serão juntadas na pendência que já tem causa/problema/ações\n• ${D.orfas.length} de dispositivo(s) que não existe(m) mais serão apagadas\n\nNão dá para desfazer.`)) return;
+          await arrumaPend(D);
+        },
         async excluiInv() {
           const nome = cliNome(S.cliId);
           if (!confirm(`Excluir TODO o inventário de ${nome}? Isso apaga dispositivos, senhas, alertas e legenda.`)) return;
@@ -3590,6 +3652,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
               await DB.del("inventarioAcessos", S.inv[sis].id).catch(() => {});
             }
             await DB.del("inventarioMeta", S.cliId);
+            for (const p of (S.pend || []).filter((x) => x.aberta && x.dispId)) await DB.del("pendencias", p.id).catch(() => {});
             audita("excluiu inventário", "inventarioMeta", S.cliId, nome);
             toast("Inventário excluído");
             go("lista");

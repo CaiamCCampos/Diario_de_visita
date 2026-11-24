@@ -4145,6 +4145,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             t = e.target.value.trim();
           const L = invDoCliente(cliDoPath(b));
           const d = L.find((x) => x.id === t);
+          // um dispositivo = uma pendência aberta
+          const meuId = val(b + ".id") || val(b + ".pendId") || "";
+          const outra = d && [...(S.pendAbertas || []), ...(S.pc || []), ...((S.visit && S.visit.pend) || [])].find((p) => p.aberta && !p.desconsiderada && p.dispId === d.id && p.id !== meuId);
+          if (outra) {
+            e.target.value = val(b + ".dispId") || "";
+            return void toast(`${d.tag || d.id} já tem pendência aberta ("${outra.titulo || "sem título"}"). Use essa pendência em vez de abrir outra.`);
+          }
           if (d) {
             [["dispId", d.id], ["dispSis", d.sis], ["dispTag", d.tag], ["dispIp", d.ip], ["dispPav", d.pav]].forEach(([k, v]) => setPath(b + "." + k, v));
             if (!val(b + ".tipoId") && d.tipoCat && S.cat.tipos.some((x) => x.id === d.tipoCat)) {
