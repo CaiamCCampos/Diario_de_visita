@@ -1124,11 +1124,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       };
       const PAPEIS = { admin: "Administrador", supervisor: "Supervisor", tecnico: "Técnico" };
       // admin: tudo (inclusive subir planilhas, criar e excluir); supervisor: altera os dispositivos que já existem;
-      // técnico: só vê os dispositivos (as senhas dos clientes ficam com administrador e supervisor; as regras do Firestore também bloqueiam).
+      // supervisor e técnico (iguais, 24/11/2026): editam dispositivos e senhas, confirmam senhas, adicionam dispositivos e criam pelo catálogo;
+      // subir planilha, excluir dispositivo e excluir inventário ficam só com o administrador.
       const PERM = {
         admin: ["*"],
-        supervisor: ["inv.editar", "inv.acesso", "inv.confirmar", "inv.alertas", "inv.legenda", "inv.catalogo", "inv.criarTipo"],
-        tecnico: [],
+        supervisor: ["inv.editar", "inv.acesso", "inv.confirmar", "inv.alertas", "inv.legenda", "inv.catalogo", "inv.criarTipo", "inv.novo"],
+        tecnico: ["inv.editar", "inv.acesso", "inv.confirmar", "inv.alertas", "inv.legenda", "inv.catalogo", "inv.criarTipo", "inv.novo"],
       };
       const pode = (a) => {
         const p = PERM[(S.me || {}).papel] || [];
@@ -2038,7 +2039,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   <div class="kpis"><div class="kpi"><div class="r">Clientes com inventário</div><div class="n">${com.length}</div></div><div class="kpi"><div class="r">Dispositivos</div><div class="n">${tot.d}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${tot.sp}</div></div><div class="kpi am"><div class="r">Alertas a conferir</div><div class="n">${tot.al}</div></div><div class="kpi"><div class="r">Clientes sem inventário</div><div class="n">${sem.length}</div></div></div>
   <label>Buscar cliente</label><input id="busca" data-f="busca" value="${esc(S.busca)}" placeholder="Nome ou MP"></div>
   <div class="card"><h2>Com inventário</h2>${com.map(card).join("") || '<p class="sm">Nenhum inventário ainda.' + (pode("inv.importar") ? " Use Importar planilha." : "") + "</p>"}</div>
-  ${sem.length ? `<div class="card"><h2>Sem inventário</h2>${sem.map((c) => `<div class="li" style="cursor:default"><div class="t"><b>${esc(c.unidade)}</b><span>${c.mp ? `<span class="chip">${esc(c.mp)}</span> ` : ""}${pode("inv.importar") ? `<button class="b s" data-a="impCli" data-id="${esc(c.id)}" style="margin:0">Importar planilha</button> <button class="b o s" data-a="criaCat" data-id="${esc(c.id)}" style="margin:0">Criar pelo catálogo</button>` : ""}</span></div></div>`).join("")}</div>` : ""}`;
+  ${sem.length ? `<div class="card"><h2>Sem inventário</h2>${sem.map((c) => `<div class="li" style="cursor:default"><div class="t"><b>${esc(c.unidade)}</b><span>${c.mp ? `<span class="chip">${esc(c.mp)}</span> ` : ""}${pode("inv.importar") ? `<button class="b s" data-a="impCli" data-id="${esc(c.id)}" style="margin:0">Importar planilha</button> ` : ""}${pode("inv.novo") ? `<button class="b o s" data-a="criaCat" data-id="${esc(c.id)}" style="margin:0">Criar pelo catálogo</button> <button class="b o s" data-a="abreCli" data-id="${esc(c.id)}" style="margin:0">Cadastrar dispositivo</button>` : ""}</span></div></div>`).join("")}</div>` : ""}`;
       }
 
       /* ---- importação (só administrador) ---- */
@@ -2068,7 +2069,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
   <div class="kpis">${Object.entries(r.inv)
     .map(([s, l]) => `<div class="kpi"><div class="r">${esc(s)}</div><div class="n">${l.length}</div></div>`)
     .join("")}<div class="kpi am"><div class="r">Alertas</div><div class="n">${al.filter(alertaAtivo).length}</div></div><div class="kpi red"><div class="r">Senhas a confirmar</div><div class="n">${rs.senhasPend}</div></div></div>
-  <p class="sm">Todo dispositivo com login/senha entra como <b>senha a confirmar</b>. Ele sai dessa lista quando alguém confere a senha no cliente e marca <b>Senha OK</b>.${existe ? " Os que já estavam confirmados continuam confirmados se a senha não mudou." : ""}</p>
+  <label class="k" style="margin-top:8px"><input type="checkbox" data-a="impConf"${I.conferidas ? " checked" : ""}> <span><b>As senhas desta planilha já estão conferidas</b>: entram como confirmadas e não vão para "Senhas a confirmar".</span></label>
+  <p class="sm">${I.conferidas ? "As senhas entram como confirmadas por você, com a data de hoje." : `Sem marcar, todo dispositivo com login/senha entra como <b>senha a confirmar</b> e sai dessa lista quando alguém marca <b>Senha OK</b>.${existe ? " Os que já estavam confirmados continuam confirmados se a senha não mudou." : ""}`}</p>
   <details class="eq"><summary class="sp"><b>Alertas encontrados</b><span class="chip am">${al.length}</span></summary>${al.map((a) => `<div class="sm">· <b>${esc(a.tipo)}</b> (${esc(a.sis)}) ${esc(a.tag || "")} — ${esc(a.texto)}</div>`).join("") || '<p class="sm">Nenhum.</p>'}</details>
   <details class="eq"><summary class="sp"><b>Padronização aplicada</b><span class="chip">${r.equivalencias.length}</span></summary><div class="prev"><table><tr><th>Campo</th><th>Original</th><th>Padronizado</th><th>Qtd.</th></tr>${r.equivalencias.map((e) => `<tr><td>${esc(e[0])}</td><td>${esc(e[1])}</td><td>${esc(e[2])}</td><td>${e[3]}</td></tr>`).join("")}</table></div></details>
   <button class="b" data-a="impSalva"${I.salvando ? " disabled" : ""} style="width:100%">${I.salvando ? "Salvando…" : existe ? (I.modo === "juntar" ? "Acrescentar ao inventário" : "Substituir o inventário") + " (vira v" + ((existe.versao || 1) + 1) + ")" : "Salvar inventário"}</button></div>`;
@@ -2085,7 +2087,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const cli = S.clientes.find((c) => c.id === S.cliId) || { unidade: S.meta ? S.meta.clienteNome : "Cliente" };
         const m = S.meta;
         if (!m && !Object.keys(S.inv).length)
-          return `<div class="card"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3 style="margin-top:10px">${esc(cli.unidade)}</h3><p class="sm">Este cliente ainda não tem inventário. Importe a planilha ou cadastre os dispositivos um a um.</p>${pode("inv.importar") ? `<button class="b" data-a="impCli" data-id="${esc(S.cliId)}">Importar planilha</button><button class="b o" data-a="criaCat" data-id="${esc(S.cliId)}">Criar pelo catálogo</button><button class="b o" data-a="novoItem" data-sis="CFTV">Cadastrar dispositivo</button>` : ""}</div>${S.criaCat ? vCriaCat() : ""}${S.novo ? vNovo() : ""}`;
+          return `<div class="card"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3 style="margin-top:10px">${esc(cli.unidade)}</h3><p class="sm">Este cliente ainda não tem inventário. Importe a planilha ou cadastre os dispositivos um a um.</p>${pode("inv.importar") ? `<button class="b" data-a="impCli" data-id="${esc(S.cliId)}">Importar planilha</button>` : ""}${pode("inv.novo") ? `<button class="b o" data-a="criaCat" data-id="${esc(S.cliId)}">Criar pelo catálogo</button><button class="b o" data-a="novoItem" data-sis="CFTV">Cadastrar dispositivo</button>` : ""}</div>${S.criaCat ? vCriaCat() : ""}${S.novo ? vNovo() : ""}`;
         const al = calcAlertas(S.inv, m),
           alAt = al.filter(alertaAtivo).length;
         const r = resumo(S.inv, m, S.aces);
@@ -2164,7 +2166,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const ext = sis ? (EXTRAS[sis] || []) : [];
         const inp = (k, rot, o = {}) => `<div><label>${esc(rot)}</label><input id="n_${k}" value="${esc(N[k] || "")}"${o.list ? ` list="${o.list}"` : ""}${o.ph ? ` placeholder="${esc(o.ph)}"` : ""} autocomplete="off"></div>`;
         return `<div class="card" style="border:2px solid var(--p)"><h2>Novo dispositivo</h2>
-  <div class="g"><div><label>Sistema</label><select id="n_sis"><option value="">— escolher —</option>${SISTEMAS.map((x) => `<option${x === sis ? " selected" : ""}>${x}</option>`).join("")}</select>${sis && !S.inv[sis] ? `<div class="sm">Este cliente ainda não tem ${esc(sis)}: o sistema será criado${pode("inv.importar") ? "" : " (só o administrador pode)"}.</div>` : ""}</div>
+  <div class="g"><div><label>Sistema</label><select id="n_sis"><option value="">— escolher —</option>${SISTEMAS.map((x) => `<option${x === sis ? " selected" : ""}>${x}</option>`).join("")}</select>${sis && !S.inv[sis] ? `<div class="sm">Este cliente ainda não tem ${esc(sis)}: o sistema será criado${pode("inv.novo") ? "" : " (sem permissão)"}.</div>` : ""}</div>
   ${inp("tipo", "Tipo", { list: "dlNTipo", ph: "Ex.: CÂMERA, NVR, QUADRO DE DISTRIBUIÇÃO" })}<datalist id="dlNTipo">${tipos.map((t) => `<option value="${esc(t)}">`).join("")}</datalist></div>
   <div class="g">${inp("tag", "TAG (nome)")}${inp("ip", "IP")}${inp("pav", "Pavimento", { list: "dlPav" })}
   ${ext.filter((k) => k !== "firmware").map((k) => inp(k, ROT[k])).join("")}
@@ -3409,7 +3411,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           }
           const sists = Object.keys(novos);
           if (!sists.length) return toast("Escolha pelo menos um tipo ou equipamento");
-          if (sists.some((x) => !S.inv[x]) && !pode("inv.importar")) return toast("Só o administrador cria um sistema novo no cliente");
+          if (sists.some((x) => !S.inv[x]) && !pode("inv.novo")) return toast("Sem permissão para criar um sistema novo no cliente");
           el.disabled = true;
           let n = 0;
           try {
@@ -3494,7 +3496,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (!sis) return toast("Escolha o sistema");
           if (!N.tipo && !N.tag && !N.ip) return toast("Preencha pelo menos o tipo, a TAG ou o IP");
           const cli = S.clientes.find((c) => c.id === S.cliId) || { id: S.cliId };
-          if (!S.inv[sis] && !pode("inv.importar")) return toast("Só o administrador cria um sistema novo no cliente");
+          if (!S.inv[sis] && !pode("inv.novo")) return toast("Sem permissão para criar um sistema novo no cliente");
           const doc = S.inv[sis] ? clone(S.inv[sis]) : { id: docId(cli.id, sis), clienteId: cli.id, equipeId: cli.equipeId || "", sistema: sis, fabricante: "", itens: [], centrais: [] };
           const prox = (doc.itens || []).reduce((m, a) => Math.max(m, +String(a.id).split("-").pop() || 0), 0) + 1;
           const id = `${CODIGO[sis] || sis}-${String(prox).padStart(4, "0")}`;
@@ -3563,6 +3565,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             toast("Não consegui excluir: " + (e.code || e.message));
           }
         },
+        impConf(el) {
+          S.imp.conferidas = el.checked;
+          render();
+        },
         impModo(el) {
           const I = S.imp;
           I.modo = el.value;
@@ -3615,6 +3621,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 if (it.outros && it.outros.length) a.outros = it.outros;
                 if (Object.keys(a).length) acessos[it.id] = a;
                 const n = { ...it };
+                // planilha marcada como conferida: a senha já entra confirmada
+                if (I.conferidas && !n.verificado && Object.keys(a).some((k) => k !== "outros")) {
+                  n.verificado = agoraIso();
+                  n.verificadoPor = meuNome() + " (planilha conferida)";
+                }
                 ACESSO.forEach((k) => delete n[k]);
                 delete n.outros;
                 if (n.detalhes && !n.detalhes.length) delete n.detalhes;
@@ -3650,7 +3661,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             };
             meta.resumo = resumo(novoInv, meta, novoAces);
             await DB.set("inventarioMeta", cli.id, meta);
-            audita("importou inventário", "inventarioMeta", cli.id, `${cli.unidade} · v${meta.versao} · ${I.nome} · ${meta.resumo.total} dispositivos`);
+            audita("importou inventário", "inventarioMeta", cli.id, `${cli.unidade} · v${meta.versao} · ${I.nome} · ${meta.resumo.total} dispositivos${I.conferidas ? " · senhas marcadas como conferidas" : ""}`);
             let nPend = 0;
             try {
               nPend = await abrePendOffline(cli, novoInv);

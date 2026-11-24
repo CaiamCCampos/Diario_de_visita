@@ -1,0 +1,281 @@
+// Arquivo: regras-completas_2026-11-24.rules
+// Criado em: 24/11/2026
+// Conteúdo: regras COMPLETAS do Firestore (diário, simulados, SDAI, inventário). Substituem tudo o que está no console.
+// Onde colar: Console do Firebase > Firestore > Regras > apagar tudo > colar este arquivo inteiro > Publicar.
+// Mudanças em relação a regras-completas_2026-11-23.rules:
+//   1. inventarioAcessos (logins e senhas dos clientes): técnico volta a ler e alterar (igual ao supervisor), sempre só da própria equipe.
+//   2. inventarioConfig: técnico também liga tipos ao catálogo (antes só admin e supervisor).
+//   3. catalogo: técnico também pode acrescentar tipos (criar tipo pelo inventário), sem apagar nada (as listas não podem encolher).
+//   4. inventario / inventarioAcessos / inventarioMeta: supervisor e técnico podem CRIAR o inventário de um cliente da própria equipe
+//      (levantamento: adicionar dispositivo ou criar pelo catálogo num cliente que ainda não tem inventário).
+//   Continua só do administrador: apagar documentos do inventário (excluir inventário), e quem não é admin não diminui a lista de dispositivos.
+//   Subir planilha continua só com o administrador pela tela do sistema.
+//   5. leitura de documento do inventário que ainda não existe é permitida (a gravação em transação lê antes de criar).
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- funções auxiliares ----------
+    function perfil() { return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data; }
+    function logado() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && perfil().ativo == true;
+    }
+    function ehAdmin() { return logado() && perfil().papel == 'admin'; }
+    function ehSup() { return logado() && perfil().papel == 'supervisor'; }
+    function ehTec() { return logado() && perfil().papel == 'tecnico'; }
+    function daEquipe(eq) { return logado() && (perfil().papel == 'admin' || perfil().equipeId == eq); }
+    function gestor(eq) { return (ehAdmin() || ehSup()) && daEquipe(eq); }
+
+    // ---------- exceção de equipe (passo 5) ----------
+    // Autorização "autorizacoes/{clienteId}_{equipeAutorizadaId}": libera UMA visita de outra equipe em um cliente.
+    function autPath(cid) { return /databases/$(database)/documents/autorizacoes/$(cid + '_' + perfil().equipeId); }
+    function temAut(cid) {
+      return logado() && perfil().get('equipeId', '') != '' && exists(autPath(cid))
+        && (get(autPath(cid)).data.status == 'em_uso'
+          || (get(autPath(cid)).data.status == 'aguardando' && get(autPath(cid)).data.validaAteMs >= request.time.toMillis()));
+    }
+    function visitante(cid) { return (ehTec() || ehSup()) && temAut(cid); }
+
+    // ---------- usuários ----------
+    match /usuarios/{id} {
+      allow get: if request.auth != null && (request.auth.uid == id || ehAdmin() || (ehSup() && resource.data.equipeId == perfil().equipeId));
+      allow list: if ehAdmin() || (ehSup() && resource.data.equipeId == perfil().equipeId);
+      // só o administrador cria usuários (23/11/2026: removida a criação automática do primeiro admin)
+      allow create: if ehAdmin();
+      // o próprio usuário só pode "baixar" a obrigação de trocar a senha (trocarSenha: true -> false)
+      allow update: if ehAdmin()
+        || (request.auth != null && request.auth.uid == id && resource.data.get('trocarSenha', false) == true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['trocarSenha'])
+          && request.resource.data.trocarSenha == false);
+      allow delete: if ehAdmin();
+    }
+
+    // ---------- equipes ----------
+    match /equipes/{id} {
+      allow read: if logado();
+      allow write: if ehAdmin();
+    }
+
+    // ---------- catálogo e configuração (globais) ----------
+    // O supervisor adiciona e edita; só o admin exclui sistemas e equipamentos (as listas não podem encolher).
+    match /catalogo/{id} {
+      allow read: if logado();
+      allow create: if ehAdmin() || ehSup();
+      allow update: if ehAdmin() || ((ehSup() || ehTec())
+        && request.resource.data.tipos.size() >= resource.data.tipos.size()
+        && request.resource.data.sis.size() >= resource.data.sis.size());
+      allow delete: if ehAdmin();
+    }
+    match /config/{id} {
+      allow read: if logado();
+      allow write: if ehAdmin() || ehSup();
+    }
+
+    // ---------- clientes ----------
+    match /clientes/{id} {
+      allow read: if daEquipe(resource.data.equipeId) || temAut(id);
+      allow create: if gestor(request.resource.data.equipeId);
+      allow update: if
+        // admin e supervisor alteram tudo, sem trocar de equipe (só o admin muda a equipe)
+        (gestor(resource.data.equipeId) && (ehAdmin() || request.resource.data.equipeId == resource.data.equipeId))
+        // técnico da equipe e visitante autorizado: só os dados da última visita; o técnico da equipe também os equipamentos (sem apagar)
+        || ((ehTec() && daEquipe(resource.data.equipeId)) || visitante(id))
+          && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ultimaVisita', 'ultimaVisitaDados'])
+            || (ehTec() && daEquipe(resource.data.equipeId)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ultimaVisita', 'ultimaVisitaDados', 'eqs'])
+              && request.resource.data.eqs.size() == resource.data.eqs.size()));
+      allow delete: if gestor(resource.data.equipeId);
+    }
+
+    // ---------- visitas ----------
+    function donoVisita(r) { return r.data.get('autorId', '') == request.auth.uid; }
+    match /visitas/{id} {
+      allow read: if daEquipe(resource.data.equipeId)
+        || (logado() && resource.data.get('equipeAutorId', '') == perfil().get('equipeId', '_'));
+      allow create: if logado() && request.resource.data.autorId == request.auth.uid
+        && (daEquipe(request.resource.data.equipeId)
+          || (request.resource.data.get('excecao', false) == true
+            && request.resource.data.equipeAutorId == perfil().get('equipeId', '_')
+            && get(/databases/$(database)/documents/autorizacoes/$(request.resource.data.autorizacaoId)).data.status == 'em_uso'
+            && get(/databases/$(database)/documents/autorizacoes/$(request.resource.data.autorizacaoId)).data.visitaId == request.resource.data.id
+            && get(/databases/$(database)/documents/autorizacoes/$(request.resource.data.autorizacaoId)).data.equipeAutorizadaId == perfil().get('equipeId', '_')
+            && get(/databases/$(database)/documents/autorizacoes/$(request.resource.data.autorizacaoId)).data.equipeDonaId == request.resource.data.equipeId
+            && get(/databases/$(database)/documents/autorizacoes/$(request.resource.data.autorizacaoId)).data.clienteId == request.resource.data.clienteId));
+      allow update: if logado()
+        && request.resource.data.equipeId == resource.data.equipeId
+        && request.resource.data.get('autorId', '') == resource.data.get('autorId', '')
+        && ((daEquipe(resource.data.equipeId) && (gestor(resource.data.equipeId) || donoVisita(resource)))
+          || (resource.data.get('excecao', false) == true
+            && resource.data.get('equipeAutorId', '') == perfil().get('equipeId', '_')
+            && (donoVisita(resource) || ehSup())));
+      allow delete: if gestor(resource.data.equipeId)
+        || (logado() && donoVisita(resource) && resource.data.status == 'rascunho'
+          && (daEquipe(resource.data.equipeId) || resource.data.get('excecao', false) == true));
+    }
+
+    // ---------- pendências ----------
+    function donoPend(r) { return r.data.get('criadaPorId', '') == request.auth.uid; }
+    // campos que quem não abriu a pendência pode alterar (concluir, escrever a solução, situação do dispositivo e causa/problema)
+    function camposDeConclusao() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['solucao', 'acoes', 'obs', 'texto', 'aberta', 'concluidaEm', 'concluidaPorId', 'concluidaPorNome', 'historico',
+                    'dispStatus', 'dispAplicado', 'causa', 'problemaId', 'problemaNome'])
+        && request.resource.data.get('historico', []).size() >= resource.data.get('historico', []).size()
+        && !(request.resource.data.aberta == true && resource.data.aberta == false);
+    }
+    match /pendencias/{id} {
+      allow read: if daEquipe(resource.data.equipeId) || temAut(resource.data.clienteId);
+      allow create: if logado() && request.resource.data.criadaPorId == request.auth.uid
+        && (daEquipe(request.resource.data.equipeId)
+          || (temAut(request.resource.data.clienteId)
+            && get(autPath(request.resource.data.clienteId)).data.equipeDonaId == request.resource.data.equipeId));
+      allow update: if logado()
+        && request.resource.data.equipeId == resource.data.equipeId
+        && ((daEquipe(resource.data.equipeId)
+            && (gestor(resource.data.equipeId) || donoPend(resource) || (ehTec() && camposDeConclusao())))
+          || (visitante(resource.data.clienteId) && (donoPend(resource) || camposDeConclusao())));
+      allow delete: if gestor(resource.data.equipeId)
+        || (logado() && donoPend(resource) && (daEquipe(resource.data.equipeId) || temAut(resource.data.clienteId)));
+    }
+
+    // ---------- autorizações de outra equipe ----------
+    match /autorizacoes/{id} {
+      allow read: if logado() && (resource == null || daEquipe(resource.data.equipeDonaId) || resource.data.equipeAutorizadaId == perfil().get('equipeId', '_'));
+      allow create: if gestor(request.resource.data.equipeDonaId)
+        && request.resource.data.equipeAutorizadaId != request.resource.data.equipeDonaId
+        && request.resource.data.status == 'aguardando'
+        && id == request.resource.data.clienteId + '_' + request.resource.data.equipeAutorizadaId
+        && get(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)).data.equipeId == request.resource.data.equipeDonaId;
+      allow update: if (gestor(resource.data.equipeDonaId) && resource.data.status != 'em_uso'
+          && request.resource.data.equipeDonaId == resource.data.equipeDonaId
+          && request.resource.data.clienteId == resource.data.clienteId
+          && request.resource.data.equipeAutorizadaId == resource.data.equipeAutorizadaId)
+        || (logado() && (ehTec() || ehSup()) && resource.data.equipeAutorizadaId == perfil().get('equipeId', '_')
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'ativa', 'visitaId', 'usadaPorId', 'usadaPorNome', 'usadaEm', 'concluidaEm'])
+          && (
+            (resource.data.status == 'aguardando' && resource.data.validaAteMs >= request.time.toMillis()
+              && request.resource.data.status == 'em_uso' && request.resource.data.usadaPorId == request.auth.uid)
+            || (resource.data.status == 'em_uso' && (resource.data.usadaPorId == request.auth.uid || ehSup())
+              && request.resource.data.status in ['concluida', 'aguardando'])));
+      allow delete: if gestor(resource.data.equipeDonaId);
+    }
+
+    // ---------- simulados ----------
+    match /simulados/{id} {
+      allow get: if logado() && (resource == null || daEquipe(resource.data.equipeId));
+      allow list: if daEquipe(resource.data.equipeId);
+      allow create: if daEquipe(request.resource.data.equipeId)
+        && get(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)).data.get('equipeId', '') == request.resource.data.equipeId;
+      allow update: if daEquipe(resource.data.equipeId) && request.resource.data.equipeId == resource.data.equipeId;
+      allow delete: if gestor(resource.data.equipeId);
+    }
+    match /simuladoArquivos/{id} {
+      allow get: if logado() && (resource == null || daEquipe(resource.data.equipeId));
+      allow list: if daEquipe(resource.data.equipeId);
+      allow create: if daEquipe(request.resource.data.equipeId);
+      allow update: if daEquipe(resource.data.equipeId) && request.resource.data.equipeId == resource.data.equipeId;
+      allow delete: if daEquipe(resource.data.equipeId);
+    }
+
+    // ---------- SDAI ----------
+    match /sdaiBases/{id} {
+      allow get: if logado() && (resource == null || daEquipe(resource.data.equipeId));
+      allow list: if daEquipe(resource.data.equipeId);
+      allow create: if daEquipe(request.resource.data.equipeId)
+        && id == request.resource.data.clienteId
+        && get(/databases/$(database)/documents/clientes/$(id)).data.get('equipeId', '') == request.resource.data.equipeId;
+      allow update: if daEquipe(resource.data.equipeId)
+        && request.resource.data.equipeId == resource.data.equipeId
+        && request.resource.data.clienteId == resource.data.clienteId;
+      allow delete: if gestor(resource.data.equipeId);
+    }
+    match /sdaiEnsaios/{id} {
+      allow get: if logado() && (resource == null || daEquipe(resource.data.equipeId));
+      allow list: if daEquipe(resource.data.equipeId);
+      allow create: if daEquipe(request.resource.data.equipeId)
+        && request.resource.data.autorId == request.auth.uid
+        && get(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)).data.get('equipeId', '') == request.resource.data.equipeId;
+      allow update: if daEquipe(resource.data.equipeId)
+        && request.resource.data.equipeId == resource.data.equipeId
+        && request.resource.data.clienteId == resource.data.clienteId;
+      allow delete: if gestor(resource.data.equipeId)
+        || (daEquipe(resource.data.equipeId) && resource.data.autorId == request.auth.uid && resource.data.status != 'encerrado');
+    }
+    match /sdaiArquivos/{id} {
+      allow get: if logado() && (resource == null || daEquipe(resource.data.equipeId));
+      allow list: if daEquipe(resource.data.equipeId);
+      allow create: if daEquipe(request.resource.data.equipeId);
+      allow update: if daEquipe(resource.data.equipeId) && request.resource.data.equipeId == resource.data.equipeId;
+      allow delete: if daEquipe(resource.data.equipeId);
+    }
+
+    // ---------- auditoria e sessões ----------
+    match /auditoria/{id} {
+      allow create: if logado() && request.resource.data.uid == request.auth.uid;
+      allow read: if ehAdmin();
+      allow update, delete: if false;
+    }
+    match /sessoes/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ================= INVENTÁRIO (inventario.html) =================
+    // Admin: tudo (importar, criar, excluir). Supervisor e técnico (iguais): ler e alterar o que é da própria equipe, inclusive senhas.
+    function invPerfil() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+    function invAtivo() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && invPerfil().get('ativo', false) == true;
+    }
+    function invAdmin() {
+      return invAtivo() && invPerfil().get('papel', '') == 'admin';
+    }
+    function invDaEquipe(eq) {
+      return invAtivo() && invPerfil().get('equipeId', '') == eq;
+    }
+    // criação pela equipe dona do cliente (levantamento feito pelo técnico ou supervisor)
+    function invCriaNaEquipe() {
+      return invDaEquipe(request.resource.data.equipeId)
+        && get(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)).data.get('equipeId', '') == request.resource.data.equipeId;
+    }
+    // alteração sem trocar o documento de equipe nem de cliente
+    function invAlteraNaEquipe() {
+      return invDaEquipe(resource.data.equipeId)
+        && request.resource.data.equipeId == resource.data.equipeId
+        && request.resource.data.clienteId == resource.data.clienteId;
+    }
+    match /inventario/{id} {
+      allow read: if invAdmin() || resource == null || invDaEquipe(resource.data.equipeId);
+      allow create: if invAdmin() || invCriaNaEquipe();
+      allow delete: if invAdmin();
+      // quem não é admin altera, mas não diminui a lista de dispositivos
+      allow update: if invAdmin()
+        || (invAlteraNaEquipe() && request.resource.data.get('itens', []).size() >= resource.data.get('itens', []).size());
+    }
+    match /inventarioAcessos/{id} {
+      allow read: if invAdmin() || resource == null || invDaEquipe(resource.data.equipeId);
+      allow create: if invAdmin() || invCriaNaEquipe();
+      allow delete: if invAdmin();
+      allow update: if invAdmin() || invAlteraNaEquipe();
+    }
+    match /inventarioMeta/{id} {
+      allow read: if invAdmin() || resource == null || invDaEquipe(resource.data.equipeId);
+      allow create: if invAdmin() || invCriaNaEquipe();
+      allow delete: if invAdmin();
+      allow update: if invAdmin() || invAlteraNaEquipe();
+    }
+    // ligação dos tipos da planilha com o Catálogo do diário (todos os ativos leem; admin, supervisor e técnico alteram; ninguém apaga)
+    match /inventarioConfig/{id} {
+      allow read: if invAtivo();
+      allow create, update: if invAtivo() && invPerfil().get('papel', '') in ['admin', 'supervisor', 'tecnico'];
+      allow delete: if false;
+    }
+    // ================= fim do INVENTÁRIO =================
+  }
+}
