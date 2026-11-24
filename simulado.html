@@ -4342,7 +4342,7 @@ label.sdcam { display: inline-block; }
                 localStorage.setItem("loginTrava", JSON.stringify(L));
               } catch (_) {}
             }
-            er.textContent = AUTH_ERR[e.code] || "Erro: " + e.code;
+            er.textContent = AUTH_ERR[e.code] || "Erro: " + (e.code || e.message || "desconhecido");
           }
         },
         async trocaSenha() {
@@ -4397,7 +4397,7 @@ label.sdcam { display: inline-block; }
             er.textContent = "Enviei um e-mail para redefinir a senha.";
           } catch (e) {
             er.style.color = "";
-            er.textContent = AUTH_ERR[e.code] || "Erro: " + e.code;
+            er.textContent = AUTH_ERR[e.code] || "Erro: " + (e.code || e.message || "desconhecido");
           }
         },
         async logout() {
@@ -4987,7 +4987,7 @@ label.sdcam { display: inline-block; }
             if (DB.audit) DB.audit("enviou e-mail de redefinição de senha", "usuarios", u.uid, u.email);
             toast("Enviei o e-mail de nova senha");
           } catch (e) {
-            toast(AUTH_ERR[e.code] || "Erro: " + e.code);
+            toast(AUTH_ERR[e.code] || "Não consegui enviar o e-mail: " + (e.code || e.message || "erro desconhecido"));
           }
         },
         backup,

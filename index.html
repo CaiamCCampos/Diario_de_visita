@@ -4149,8 +4149,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const meuId = val(b + ".id") || val(b + ".pendId") || "";
           const outra = d && [...(S.pendAbertas || []), ...(S.pc || []), ...((S.visit && S.visit.pend) || [])].find((p) => p.aberta && !p.desconsiderada && p.dispId === d.id && p.id !== meuId);
           if (outra) {
-            e.target.value = val(b + ".dispId") || "";
-            return void toast(`${d.tag || d.id} já tem pendência aberta ("${outra.titulo || "sem título"}"). Use essa pendência em vez de abrir outra.`);
+            // central, painel, controladora, NVR/DVR e servidor podem ter vários problemas diferentes ao mesmo tempo (ex.: laços de uma central)
+            const multiplo = /CENTRAL|PAINEL|CONTROLADORA|NVR|DVR|SERVIDOR/.test(semAc(`${d.tipo} ${d.tag}`).toUpperCase());
+            if (!multiplo || !confirm(`${d.tag || d.id} já tem pendência aberta ("${outra.titulo || "sem título"}").\n\nÉ um problema DIFERENTE neste equipamento? OK para abrir outra pendência; Cancelar para usar a que já existe.`)) {
+              e.target.value = val(b + ".dispId") || "";
+              return void toast(`${d.tag || d.id} já tem pendência aberta ("${outra.titulo || "sem título"}"). Use essa pendência em vez de abrir outra.`);
+            }
           }
           if (d) {
             [["dispId", d.id], ["dispSis", d.sis], ["dispTag", d.tag], ["dispIp", d.ip], ["dispPav", d.pav]].forEach(([k, v]) => setPath(b + "." + k, v));
@@ -4787,7 +4791,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 localStorage.setItem("loginTrava", JSON.stringify(L));
               } catch (_) {}
             }
-            er.textContent = AUTH_ERR[e.code] || "Erro: " + e.code;
+            er.textContent = AUTH_ERR[e.code] || "Erro: " + (e.code || e.message || "desconhecido");
           }
         },
         async trocaSenha() {
@@ -4842,7 +4846,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             er.textContent = "Enviei um e-mail para redefinir a senha.";
           } catch (e) {
             er.style.color = "";
-            er.textContent = AUTH_ERR[e.code] || "Erro: " + e.code;
+            er.textContent = AUTH_ERR[e.code] || "Erro: " + (e.code || e.message || "desconhecido");
           }
         },
         async logout() {
@@ -5472,7 +5476,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             if (DB.audit) DB.audit("enviou e-mail de redefinição de senha", "usuarios", u.uid, u.email);
             toast("Enviei o e-mail de nova senha");
           } catch (e) {
-            toast(AUTH_ERR[e.code] || "Erro: " + e.code);
+            toast(AUTH_ERR[e.code] || "Não consegui enviar o e-mail: " + (e.code || e.message || "erro desconhecido"));
           }
         },
         backup,

@@ -1739,7 +1739,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const ab = (S.pend || []).filter((p) => p.aberta && p.dispId);
         const orfas = ab.filter((p) => !ids.has(p.dispId) && (!p.dispSis || sisCarregados.has(semAcento(p.dispSis).toUpperCase())));
         const porDisp = new Map();
-        ab.filter((p) => ids.has(p.dispId)).forEach((p) => (porDisp.get(p.dispId) || porDisp.set(p.dispId, []).get(p.dispId)).push(p));
+        // só as automáticas (abertas pelo inventário): pendências escritas no diário podem ser problemas diferentes do mesmo equipamento (ex.: laços de uma central)
+        ab.filter((p) => ids.has(p.dispId) && p.origem === "inventário").forEach((p) => (porDisp.get(p.dispId) || porDisp.set(p.dispId, []).get(p.dispId)).push(p));
         // fica uma pendência por dispositivo: a aberta com mais informação; desconsiderada só fica se for a única
         const dup = [...porDisp.values()]
           .filter((l) => l.length > 1 && l.some((p) => !p.desconsiderada))
@@ -2572,7 +2573,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const DP = diagPend(),
           nArr = DP.orfas.length + DP.dup.reduce((a, d) => a + d.sai.length, 0);
         const avisoArr = nArr
-          ? `<div class="card" style="border:1px solid #c47a00;background:#fff6e0"><b>Pendências para arrumar</b><div class="sm" style="margin:4px 0 8px">${DP.dup.length ? `${DP.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s) — mesmo dispositivo com mais de uma pendência aberta: ${DP.dup.map((d) => esc(d.fica.dispTag || d.fica.titulo)).slice(0, 12).join(", ")}${DP.dup.length > 12 ? "…" : ""}. ` : ""}${DP.orfas.length ? `${DP.orfas.length} de dispositivo(s) que não existe(m) mais no inventário: ${DP.orfas.map((p) => esc(p.dispTag || p.titulo)).slice(0, 12).join(", ")}${DP.orfas.length > 12 ? "…" : ""}.` : ""}</div>${ehAdmin() ? `<button class="b s" data-a="arrumaPend" style="margin:0">Arrumar agora</button> <span class="sm">As duplicadas viram uma só (fica a que tem causa/problema/ações, e o resto é juntado nela); as sem dispositivo são apagadas.</span>` : '<span class="sm">Peça ao administrador para arrumar.</span>'}</div>`
+          ? `<div class="card" style="border:1px solid #c47a00;background:#fff6e0"><b>Pendências para arrumar</b><div class="sm" style="margin:4px 0 8px">${DP.dup.length ? `${DP.dup.reduce((a, d) => a + d.sai.length, 0)} duplicada(s) — mesmo dispositivo com mais de uma pendência automática (aberta pelo inventário): ${DP.dup.map((d) => esc(d.fica.dispTag || d.fica.titulo)).slice(0, 12).join(", ")}${DP.dup.length > 12 ? "…" : ""}. ` : ""}${DP.orfas.length ? `${DP.orfas.length} de dispositivo(s) que não existe(m) mais no inventário: ${DP.orfas.map((p) => esc(p.dispTag || p.titulo)).slice(0, 12).join(", ")}${DP.orfas.length > 12 ? "…" : ""}.` : ""}</div>${ehAdmin() ? `<button class="b s" data-a="arrumaPend" style="margin:0">Arrumar agora</button> <span class="sm">As duplicadas viram uma só (fica a que tem causa/problema/ações, e o resto é juntado nela); as sem dispositivo são apagadas. Pendências escritas no diário nunca são juntadas.</span>` : '<span class="sm">Peça ao administrador para arrumar.</span>'}</div>`
           : "";
         return `${avisoArr}<div class="kpis"><div class="kpi red"><div class="r">Em aberto</div><div class="n">${ab.length}</div></div><div class="kpi ok"><div class="r">Concluídas</div><div class="n">${co.length}</div></div><div class="kpi"><div class="r">Tempo médio para concluir</div><div class="n">${tm.length ? Math.round(tm.reduce((a, b) => a + b, 0) / tm.length) + " d" : "—"}</div></div></div>
   <div class="note" style="background:#f6f6f7">Estas são as pendências do diário para este cliente. Dispositivo que fica OFFLINE ou em FALHA no inventário abre uma pendência automaticamente; se ele for marcado como VAZIO, a pendência é desconsiderada. A conclusão é sempre feita no diário.</div>
@@ -3278,7 +3279,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           const doc = clone(S.inv[sis]),
             n = doc.itens.find((i) => i.id === it.id);
           const stAntes = n.status,
-            qAntes = n.quadro;
+            qAntes = n.quadro,
+            tagAntes = n.tag || "";
           if (pode("inv.editar")) {
             camposSis(sis).forEach((k) => {
               const el = $("#e_" + k);
@@ -3336,6 +3338,19 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             const msg = ["Dispositivo salvo"];
             try {
               if (SEM_REDE.includes(n.status) && (!SEM_REDE.includes(stAntes) || n.quadro !== qAntes) && (await abrePendOffline(cli, { [sis]: { itens: [n] } }, S.inv))) msg.push("pendência aberta no diário");
+              // TAG mudou: as pendências abertas do dispositivo passam a mostrar a TAG nova (e o título, se era a TAG antiga)
+              if ((n.tag || "") !== tagAntes) {
+                let k = 0;
+                for (const p of (S.pend || []).filter((x) => x.aberta && x.dispId === n.id)) {
+                  const q = { ...p, dispTag: n.tag || "" };
+                  if (!p.titulo || p.titulo === tagAntes || p.titulo === p.dispTag) q.titulo = n.tag || p.titulo;
+                  const d1 = new Date();
+                  q.historico = [...(p.historico || []), { data: hoje(), hora: `${pad(d1.getHours())}:${pad(d1.getMinutes())}`, ts: Date.now(), status: "Atualizada", por: meuNome() + " (inventário)", alt: [{ c: "Dispositivo do inventário", de: tagAntes, para: n.tag || "" }] }];
+                  await DB.set("pendencias", p.id, q);
+                  k++;
+                }
+                if (k) msg.push(k + " pendência(s) com a TAG nova");
+              }
               // virou VAZIO (canal sem câmera): a pendência automática ainda em branco é concluída
               if (n.status === "VAZIO" && stAntes !== "VAZIO" && (await fechaPendVazio(cli, [n]))) msg.push("pendência desconsiderada (vazio)");
               // ligado a um quadro sem rede que tem problema aberto: a pendência do dispositivo é ligada a esse problema
