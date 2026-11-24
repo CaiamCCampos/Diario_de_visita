@@ -3688,12 +3688,16 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           if (!confirm(`Excluir TODO o inventário de ${nome}? Isso apaga dispositivos, senhas, alertas e legenda.`)) return;
           if (prompt('Para confirmar, digite EXCLUIR') !== "EXCLUIR") return;
           try {
-            for (const sis of Object.keys(S.inv)) {
-              await DB.del("inventario", S.inv[sis].id);
-              await DB.del("inventarioAcessos", S.inv[sis].id).catch(() => {});
+            // guarda tudo antes: ao apagar o 1º documento a tela se atualiza e S.inv/S.pend mudam
+            const docs = Object.values(S.inv).map((d) => d.id),
+              cliId = S.cliId,
+              pends = (S.pend || []).filter((x) => x.aberta && x.dispId).map((p) => p.id);
+            for (const id of docs) {
+              await DB.del("inventario", id);
+              await DB.del("inventarioAcessos", id).catch(() => {});
             }
-            await DB.del("inventarioMeta", S.cliId);
-            for (const p of (S.pend || []).filter((x) => x.aberta && x.dispId)) await DB.del("pendencias", p.id).catch(() => {});
+            await DB.del("inventarioMeta", cliId);
+            for (const id of pends) await DB.del("pendencias", id).catch(() => {});
             audita("excluiu inventário", "inventarioMeta", S.cliId, nome);
             toast("Inventário excluído");
             go("lista");
