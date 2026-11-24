@@ -13,9 +13,9 @@
     <link rel="apple-touch-icon" href="icon-180.png" />
     <link rel="icon" type="image/png" href="icon-192.png" />
     <!-- SheetJS: lê a planilha antiga (.xlsx) no navegador e gera o Excel exportado -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
     <!-- ExcelJS: monta a planilha exportada no modelo profissional (cores, painel, abas por sistema) -->
-    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <script src="vendor/exceljs-4.4.0.min.js"></script>
     <script src="config.js"></script>
     <style>
       :root {
@@ -830,6 +830,14 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             write(c, o);
             notify(c);
           },
+          async transacao(c, id, fn) {
+            const o = read(c);
+            const n = fn(o[id] ? deFS(clone(o[id])) : null);
+            o[id] = paraFS(clone(n));
+            write(c, o);
+            notify(c);
+            return n;
+          },
           async list(c, f, v) {
             return rows(c, f, v);
           },
@@ -905,6 +913,24 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           },
           async del(c, id) {
             await fsM.deleteDoc(fsM.doc(db, c, id));
+          },
+          async transacao(c, id, fn) {
+            const ref = fsM.doc(db, c, id);
+            try {
+              return await tenta(() =>
+                fsM.runTransaction(db, async (t) => {
+                  const s = await t.get(ref);
+                  const n = fn(s.exists() ? deFS(s.data()) : null);
+                  t.set(ref, paraFS(clone(n)));
+                  return n;
+                }),
+              );
+            } catch (e) {
+              if (navigator.onLine && e.code !== "unavailable") throw e;
+              const n = fn(null); // sem internet: grava a versão local (o Firestore envia quando voltar)
+              await fsM.setDoc(ref, paraFS(clone(n)));
+              return n;
+            }
           },
           async list(c, f, v) {
             const s = await tenta(() => fsM.getDocs(q(c, f, v)));
@@ -985,6 +1011,56 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           showSave();
         }
       }
+      async function gravaT(c, id, fn) {
+        gravando++;
+        showSave();
+        try {
+          return await DB.transacao(c, id, fn);
+        } catch (e) {
+          console.error(e);
+          toast(e.code === "permission-denied" ? "Sem permissão para salvar. Avise o administrador (regras do Firestore)." : "Não consegui salvar: " + (e.code || e.message));
+          return null;
+        } finally {
+          gravando--;
+          showSave();
+        }
+      }
+      /* ---- gravação sem apagar o que outra pessoa salvou ao mesmo tempo ----
+         base = como o documento estava quando chegou do servidor; local = como está nesta tela; remoto = como está agora no servidor.
+         Se o remoto mudou desde a base, junta: vale o que ESTA tela alterou (por dispositivo / por chave) e o resto fica como está no servidor. */
+      const estavel = (x) =>
+        Array.isArray(x) ? "[" + x.map(estavel).join(",") + "]" : x && typeof x === "object" ? "{" + Object.keys(x).sort().map((k) => JSON.stringify(k) + ":" + estavel(x[k])).join(",") + "}" : JSON.stringify(x === undefined ? null : x);
+      const igualJ = (a, b) => estavel(a) === estavel(b);
+      function mescla3(B, L, R, lista, mapas = []) {
+        if (!R || !B || igualJ(B, R)) return L;
+        const out = {};
+        new Set([...Object.keys(L), ...Object.keys(R)]).forEach((k) => {
+          if (k === lista || mapas.includes(k)) return;
+          out[k] = igualJ(L[k], B[k]) ? R[k] : L[k];
+        });
+        if (lista) {
+          const id = (i) => i.id;
+          const mB = new Map((B[lista] || []).map((i) => [id(i), i])),
+            mL = new Map((L[lista] || []).map((i) => [id(i), i])),
+            mR = new Set((R[lista] || []).map(id));
+          out[lista] = (R[lista] || [])
+            .filter((i) => !(mB.has(id(i)) && !mL.has(id(i)))) // apagado nesta tela
+            .map((i) => (mL.has(id(i)) && !igualJ(mL.get(id(i)), mB.get(id(i))) ? mL.get(id(i)) : i))
+            .concat((L[lista] || []).filter((i) => !mB.has(id(i)) && !mR.has(id(i)))); // criado nesta tela
+        }
+        mapas.forEach((k) => {
+          const b = B[k] || {},
+            l = L[k] || {},
+            r = R[k] || {},
+            m = {};
+          new Set([...Object.keys(l), ...Object.keys(r), ...Object.keys(b)]).forEach((x) => {
+            const v = igualJ(l[x], b[x]) ? r[x] : l[x];
+            if (v !== undefined) m[x] = v;
+          });
+          out[k] = m;
+        });
+        return out;
+      }
       function showSave() {
         const el = $("#savestat");
         if (!el) return;
@@ -998,6 +1074,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
    3. ESTADO, PERFIS E PERMISSÕES
    ================================================================== */
       const S = {
+        base: {}, // última versão de cada documento vinda do servidor (para juntar gravações simultâneas)
         authChecked: false,
         user: null,
         me: null,
@@ -1028,11 +1105,11 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
       };
       const PAPEIS = { admin: "Administrador", supervisor: "Supervisor", tecnico: "Técnico" };
       // admin: tudo (inclusive subir planilhas, criar e excluir); supervisor: altera os dispositivos que já existem;
-      // técnico: vê, confirma o acesso e corrige login/senha.
+      // técnico: só vê os dispositivos (as senhas dos clientes ficam com administrador e supervisor; as regras do Firestore também bloqueiam).
       const PERM = {
         admin: ["*"],
         supervisor: ["inv.editar", "inv.acesso", "inv.confirmar", "inv.alertas", "inv.legenda", "inv.catalogo", "inv.criarTipo"],
-        tecnico: ["inv.acesso", "inv.confirmar"],
+        tecnico: [],
       };
       const pode = (a) => {
         const p = PERM[(S.me || {}).papel] || [];
@@ -1857,6 +1934,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         unsubCli.push(
           DB.listen("inventario", f, null, (a) => {
             S.inv = {};
+            a.forEach((d) => (S.base["inventario/" + d.id] = clone(d)));
             a.forEach((d) => {
               (d.itens || []).forEach((it) => it.status && (it.status = normSt(it.status)));
               S.inv[d.sistema] = d;
@@ -1864,11 +1942,16 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             if (!S.aba || (!S.inv[S.aba] && !["alertas", "legenda", "senhas", "catalogo", "pendencias", "capacidade", "problemas"].includes(S.aba))) S.aba = SISTEMAS.find((s) => S.inv[s]) || Object.keys(S.inv)[0] || "alertas";
             render();
           }),
-          DB.listen("inventarioAcessos", f, null, (a) => {
-            S.aces = {};
-            a.forEach((d) => (S.aces[d.sistema] = d));
-            render();
-          }),
+          ...(pode("inv.acesso")
+            ? [
+                DB.listen("inventarioAcessos", f, null, (a) => {
+                  S.aces = {};
+                  a.forEach((d) => (S.base["inventarioAcessos/" + d.id] = clone(d)));
+                  a.forEach((d) => (S.aces[d.sistema] = d));
+                  render();
+                }),
+              ]
+            : []),
           DB.listen("inventarioMeta", ehAdmin() ? { clienteId: id } : { clienteId: id, equipeId: S.me.equipeId }, null, (a) => {
             S.meta = a[0] || null;
             render();
@@ -1995,8 +2078,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         const nProbAb = problemas().filter((x) => x.status !== "resolvido").length;
         const nCapCheio = al.filter((a) => (a.tipo === "Acima da capacidade" || a.tipo === "Capacidade máxima atingida" || a.tipo === "Capacidade quase no limite") && alertaAtivo(a)).length;
         const abas = [...SISTEMAS.filter((s) => S.inv[s]), ...Object.keys(S.inv).filter((s) => !SISTEMAS.includes(s))];
-        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button><button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "problemas" ? "on" : ""}" data-aba="problemas">Problemas${nProbAb ? ` <span class="chip red">${nProbAb}</span>` : ""}</button><button class="${S.aba === "capacidade" ? "on" : ""}" data-aba="capacidade">Capacidade${nCapCheio ? ` <span class="chip red">${nCapCheio}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
-        const corpo = S.aba === "problemas" ? vProblemas() : S.aba === "capacidade" ? vCapacidade() : S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
+        const tabs = `<div class="tabs">${abas.map((s) => `<button class="${S.aba === s ? "on" : ""}" data-aba="${esc(s)}">${esc(s)} <span class="sm">${(S.inv[s].itens || []).length}</span></button>`).join("")}${pode("inv.acesso") ? `<button class="${S.aba === "senhas" ? "on" : ""}" data-aba="senhas">Senhas a confirmar${r.senhasPend ? ` <span class="chip red">${r.senhasPend}</span>` : ""}</button>` : ""}<button class="${S.aba === "pendencias" ? "on" : ""}" data-aba="pendencias">Pendências${nPendAb ? ` <span class="chip red">${nPendAb}</span>` : ""}</button><button class="${S.aba === "problemas" ? "on" : ""}" data-aba="problemas">Problemas${nProbAb ? ` <span class="chip red">${nProbAb}</span>` : ""}</button><button class="${S.aba === "capacidade" ? "on" : ""}" data-aba="capacidade">Capacidade${nCapCheio ? ` <span class="chip red">${nCapCheio}</span>` : ""}</button><button class="${S.aba === "alertas" ? "on" : ""}" data-aba="alertas">Alertas${alAt ? ` <span class="chip am">${alAt}</span>` : ""}</button><button class="${S.aba === "catalogo" ? "on" : ""}" data-aba="catalogo">Catálogo${nSemCat ? ` <span class="chip red">${nSemCat}</span>` : ""}</button><button class="${S.aba === "legenda" ? "on" : ""}" data-aba="legenda">Legenda</button></div>`;
+        const corpo = S.aba === "problemas" ? vProblemas() : S.aba === "capacidade" ? vCapacidade() : S.aba === "pendencias" ? vPend() : S.aba === "catalogo" ? vCatInv() : S.aba === "senhas" && pode("inv.acesso") ? vSenhas() : S.aba === "alertas" ? vAlertas(al) : S.aba === "legenda" ? vLegenda() : S.inv[S.aba] ? vSistema(S.aba) : "";
         return `<div class="card cinl"><button class="b o s" data-v="lista" style="margin:0">← Inventários</button><h3>${esc(cli.unidade)}</h3><div class="cacts">${cli.mp ? `<span class="chip">${esc(cli.mp)}</span>` : ""}<span class="chip">v${(m && m.versao) || 1}</span>
   ${pode("inv.novo") ? `<button class="b s" data-a="novoItem" data-sis="${esc(S.inv[S.aba] ? S.aba : "")}">+ Adicionar dispositivo</button><button class="b o s" data-a="criaCat" data-id="${esc(S.cliId)}">+ Pelo catálogo</button>` : ""}${pode("inv.acesso") ? '<button class="b o s" data-a="exporta">Exportar planilha</button>' : ""}<button class="b o s" data-a="exportaSem">Exportar sem senhas</button>${pode("inv.importar") ? `<button class="b o s" data-a="impCli" data-id="${esc(S.cliId)}">Atualizar com planilha</button><button class="b o s" data-a="excluiInv">Excluir inventário</button>` : ""}</div>
   <div class="sm" style="flex:1 1 100%">Atualizado em ${esc((m && m.atualizadoEm) || "")}${m && m.atualizadoPor ? " por " + esc(m.atualizadoPor) : ""}${m && m.origem ? " · origem: " + esc(m.origem) : ""}</div></div>
@@ -2584,11 +2667,16 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         return doc ? (doc.itens || []).find((i) => i.id === S.aberto) : null;
       }
       async function salvaMeta(mod) {
-        const m = clone(S.meta || { id: S.cliId, clienteId: S.cliId, equipeId: (S.clientes.find((c) => c.id === S.cliId) || {}).equipeId || "", versao: 1, decisoes: {}, legenda: {}, importAlertas: [] });
-        mod && mod(m);
-        m.resumo = resumo(S.inv, m, S.aces);
-        S.meta = m;
-        return grava("inventarioMeta", m.id, m);
+        const novo = { id: S.cliId, clienteId: S.cliId, equipeId: (S.clientes.find((c) => c.id === S.cliId) || {}).equipeId || "", versao: 1, decisoes: {}, legenda: {}, importAlertas: [] };
+        // aplica a alteração sobre o que está no servidor agora (não apaga problemas/decisões salvos por outra pessoa)
+        const n = await gravaT("inventarioMeta", S.cliId, (r) => {
+          const m = clone(r || S.meta || novo);
+          mod && mod(m);
+          m.resumo = resumo(S.inv, m, S.aces);
+          return m;
+        });
+        if (n) S.meta = n;
+        return !!n;
       }
       /* ---- causas e problemas ----
          CAUSA = tipo de falha (lista fixa, igual em todos os clientes; a mesma lista está no diário).
@@ -2814,8 +2902,23 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         doc.atualizadoEm = agora();
         doc.atualizadoPor = meuNome();
         S.inv[sis] = doc;
-        const ok = await grava("inventario", doc.id, doc);
-        if (ok && aces) await grava("inventarioAcessos", S.aces[sis].id, S.aces[sis]);
+        const bI = S.base["inventario/" + doc.id];
+        const n = await gravaT("inventario", doc.id, (r) => mescla3(bI, doc, r, "itens"));
+        const ok = !!n;
+        if (ok) {
+          (n.itens || []).forEach((it) => it.status && (it.status = normSt(it.status)));
+          S.inv[sis] = n;
+          S.base["inventario/" + doc.id] = clone(n);
+        }
+        if (ok && aces) {
+          const A = clone(S.aces[sis]);
+          const bA = S.base["inventarioAcessos/" + A.id];
+          const nA = await gravaT("inventarioAcessos", A.id, (r) => mescla3(bA, A, r, null, ["acessos", "centrais"]));
+          if (nA) {
+            S.aces[sis] = nA;
+            S.base["inventarioAcessos/" + A.id] = clone(nA);
+          }
+        }
         if (ok) await salvaMeta((m) => {
           m.atualizadoEm = agora();
           m.atualizadoPor = meuNome();

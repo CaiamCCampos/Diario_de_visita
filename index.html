@@ -12,7 +12,7 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icon-180.png" />
     <link rel="icon" type="image/png" href="icon-192.png" />
-    <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+    <script src="vendor/docx-8.5.0.umd.js"></script>
     <script src="config.js"></script>
     <style>
       :root {
@@ -900,6 +900,17 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             write(c, o);
             notify(c);
           },
+          // lê, altera e grava numa operação só (fn altera o documento e devolve false para não gravar)
+          async atualiza(c, id, fn) {
+            const o = read(c);
+            if (!o[id]) return false;
+            const d = clone(o[id]);
+            if (fn(d) === false) return false;
+            o[id] = d;
+            write(c, o);
+            notify(c);
+            return true;
+          },
           async list(c, f, v) {
             return rows(c, f, v);
           },
@@ -1011,6 +1022,20 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           },
           async del(c, id) {
             await fsM.deleteDoc(fsM.doc(db, c, id));
+          },
+          // lê, altera e grava numa operação só: se outra pessoa salvou no meio, o Firestore refaz com a versão nova
+          async atualiza(c, id, fn) {
+            const ref = fsM.doc(db, c, id);
+            return tenta(() =>
+              fsM.runTransaction(db, async (t) => {
+                const s = await t.get(ref);
+                if (!s.exists()) return false;
+                const d = clone(s.data());
+                if (fn(d) === false) return false;
+                t.set(ref, d);
+                return true;
+              }),
+            );
           },
           async list(c, f, v) {
             const s = await tenta(() => comLimite(fsM.getDocs(q(c, f, v))));
@@ -2280,19 +2305,22 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         for (const [sis, ids] of Object.entries(porSis))
           await naFila(async () => {
             const id = `${p.clienteId}__${semAc(sis).toUpperCase()}`;
-            const doc = await DB.get("inventario", id);
-            if (!doc) return;
-            (doc.itens || []).forEach((it) => {
-              if (!ids.includes(it.id) || !SEM_REDE_D.includes(it.status)) return;
-              it.statusOrigem = { pendId: p.id, titulo: "Quadro " + q.tag + " voltou", antes: it.status, depois: "ONLINE", em: quando, por: S.me.nome || "" };
-              it.status = "ONLINE";
-              it.alteradoEm = quando;
-              it.alteradoPor = S.me.nome || "";
-              n++;
+            let k = 0;
+            await DB.atualiza("inventario", id, (doc) => {
+              k = 0;
+              (doc.itens || []).forEach((it) => {
+                if (!ids.includes(it.id) || !SEM_REDE_D.includes(it.status)) return;
+                it.statusOrigem = { pendId: p.id, titulo: "Quadro " + q.tag + " voltou", antes: it.status, depois: "ONLINE", em: quando, por: S.me.nome || "" };
+                it.status = "ONLINE";
+                it.alteradoEm = quando;
+                it.alteradoPor = S.me.nome || "";
+                k++;
+              });
+              if (!k) return false;
+              doc.atualizadoEm = quando;
+              doc.atualizadoPor = S.me.nome || "";
             });
-            doc.atualizadoEm = quando;
-            doc.atualizadoPor = S.me.nome || "";
-            await DB.set("inventario", id, doc);
+            n += k;
           });
         sr.forEach((d) => (d.status = "ONLINE"));
         if (DB.audit) DB.audit("quadro voltou: dispositivos ligados para ONLINE", "inventario", p.clienteId, `${q.tag} · ${n}`);
@@ -2316,20 +2344,24 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         try {
           const id = `${p.clienteId}__${semAc(p.dispSis).toUpperCase()}`;
           await naFila(async () => {
-            const doc = await DB.get("inventario", id);
-            const it = doc && (doc.itens || []).find((x) => x.id === p.dispId);
-            if (!it) throw new Error("dispositivo não encontrado no inventário");
-            if (it.status === p.dispStatus) return; // já está assim: nada a gravar
-            const d = new Date(),
-              quando = `${bd(hoje())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-            it.statusOrigem = { pendId: p.id, titulo: p.titulo || "", antes: it.status || "", depois: p.dispStatus, em: quando, por: S.me.nome || "" };
-            it.status = p.dispStatus;
-            it.alteradoEm = quando;
-            it.alteradoPor = S.me.nome || "";
-            doc.atualizadoEm = quando;
-            doc.atualizadoPor = S.me.nome || "";
-            await DB.set("inventario", id, doc);
-            if (DB.audit) DB.audit("situação do dispositivo pela pendência", "inventario", id, `${p.dispId} ${it.statusOrigem.antes || "—"} → ${p.dispStatus} · ${p.titulo || ""}`);
+            let achou = false,
+              antes = "";
+            const mudou = await DB.atualiza("inventario", id, (doc) => {
+              const it = (doc.itens || []).find((x) => x.id === p.dispId);
+              achou = !!it;
+              if (!it || it.status === p.dispStatus) return false; // não achou ou já está assim: nada a gravar
+              const d = new Date(),
+                quando = `${bd(hoje())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+              antes = it.status || "";
+              it.statusOrigem = { pendId: p.id, titulo: p.titulo || "", antes, depois: p.dispStatus, em: quando, por: S.me.nome || "" };
+              it.status = p.dispStatus;
+              it.alteradoEm = quando;
+              it.alteradoPor = S.me.nome || "";
+              doc.atualizadoEm = quando;
+              doc.atualizadoPor = S.me.nome || "";
+            });
+            if (!achou) throw new Error("dispositivo não encontrado no inventário");
+            if (mudou && DB.audit) DB.audit("situação do dispositivo pela pendência", "inventario", id, `${p.dispId} ${antes || "—"} → ${p.dispStatus} · ${p.titulo || ""}`);
           });
           p.dispAplicado = chave;
           [...(S.pc || []), ...((S.visit && S.visit.pend) || [])].forEach((x) => x.id === p.id && (x.dispAplicado = chave));
@@ -3088,10 +3120,10 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
 
       /* ---- exportação (bibliotecas carregadas só quando necessário) ---- */
       const LIBS = {
-        exceljs: "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js",
-        jspdf: "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
-        autotable: "https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js",
-        mammoth: "https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js",
+        exceljs: "vendor/exceljs-4.4.0.min.js",
+        jspdf: "vendor/jspdf-4.2.1.umd.min.js",
+        autotable: "vendor/jspdf-autotable-5.0.9.min.js",
+        mammoth: "vendor/mammoth-1.13.0.browser.min.js",
       };
       const libP = {};
       const lib = (k) =>
