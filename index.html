@@ -1696,7 +1696,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             : []),
           ...(S.me.papel === "admin" ? [audEscuta()] : []),
           DB.listen("pendencias", filtro({ aberta: true }), null, (a) => {
-            S.pendAbertas = a;
+            S.pendAbertas = a.filter((x) => !x.desconsiderada); // desconsideradas (dispositivo VAZIO) não contam como abertas
             softRender(["home", "clientes"]);
           }),
           DB.listen("visitas", filtro({ status: "rascunho" }), null, (a) => {
@@ -2965,7 +2965,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             desde = per === "todos" ? "" : diasAtras(+per);
           const [v, pa, pc, ex] = await Promise.all([
             listaDesde("visitas", filtro(), "data", desde),
-            DB.list("pendencias", filtro({ aberta: true })),
+            DB.list("pendencias", filtro({ aberta: true })).then((l) => l.filter((x) => !x.desconsiderada)),
             listaDesde("pendencias", filtro({ aberta: false }), "concluidaEm", desde).then((l) => l.filter((x) => !x.desconsiderada)),
             S.me.papel !== "admin" && S.me.equipeId
               ? DB.list("visitas", { equipeAutorId: S.me.equipeId, excecao: true })
@@ -4364,7 +4364,7 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             }
           }
           const pend = (await DB.list("pendencias", fCli(c)))
-            .filter((p) => p.aberta)
+            .filter((p) => p.aberta && !p.desconsiderada)
             .sort((a, b) => String(a.criada).localeCompare(String(b.criada)))
             .map((p) => ({ ...clone(p), concluir: false }));
           const v = {

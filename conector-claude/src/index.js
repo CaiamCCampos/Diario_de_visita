@@ -149,7 +149,8 @@ const filtraSis = (docs, sistema) => (sistema ? docs.filter((d) => norm(d.sistem
 
 async function pendAbertas(fs, cli) {
   const f = { clienteId: cli.id, aberta: true };
-  return (await fs.lista("pendencias", f)).sort((a, b) => String(a.criada || "").localeCompare(String(b.criada || "")));
+  // desconsideradas (dispositivo marcado VAZIO no inventário) não contam como abertas
+  return (await fs.lista("pendencias", f)).filter((p) => !p.desconsiderada).sort((a, b) => String(a.criada || "").localeCompare(String(b.criada || "")));
 }
 
 /* ---------------- ferramentas ---------------- */
