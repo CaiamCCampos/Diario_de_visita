@@ -4285,11 +4285,12 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
                 : "aguardando a visita";
       async function newVisit(cliId, tipo, aut) {
         if (!cliId) return toast("Escolha o cliente");
+        // fora do try: o catch precisa delas para devolver a autorização se algo falhar
+        const vid = uid();
+        let reservou = false;
         try {
           const c = await DB.get("clientes", cliId);
           if (!c) return toast("Cliente não encontrado");
-          let vid = uid();
-          let reservou = false;
           if (aut) {
             // exceção: reserva a autorização para esta visita (só uma pessoa da equipe consegue)
             const fresh = await DB.get("autorizacoes", aut.id);

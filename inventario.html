@@ -1045,8 +1045,27 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             mR = new Set((R[lista] || []).map(id));
           out[lista] = (R[lista] || [])
             .filter((i) => !(mB.has(id(i)) && !mL.has(id(i)))) // apagado nesta tela
-            .map((i) => (mL.has(id(i)) && !igualJ(mL.get(id(i)), mB.get(id(i))) ? mL.get(id(i)) : i))
+            .map((i) => (mB.has(id(i)) && mL.has(id(i)) && !igualJ(mL.get(id(i)), mB.get(id(i))) ? mL.get(id(i)) : i))
             .concat((L[lista] || []).filter((i) => !mB.has(id(i)) && !mR.has(id(i)))); // criado nesta tela
+          // criado nesta tela com o mesmo código que outra pessoa acabou de usar: ganha o próximo código livre
+          const usados = new Set(out[lista].map(id));
+          (L[lista] || [])
+            .filter((i) => !mB.has(id(i)) && mR.has(id(i)) && !igualJ(i, (R[lista] || []).find((r) => id(r) === id(i))))
+            .forEach((i) => {
+              const m = String(id(i)).match(/^(.*?)(\d+)$/);
+              let k = 0,
+                novo;
+              if (m) {
+                k = Math.max(...[...usados].map((x) => (String(x).startsWith(m[1]) ? +String(x).slice(m[1].length) || 0 : 0)), +m[2]);
+                do novo = m[1] + String(++k).padStart(m[2].length, "0");
+                while (usados.has(novo));
+              } else {
+                do novo = id(i) + "-" + ++k;
+                while (usados.has(novo));
+              }
+              usados.add(novo);
+              out[lista].push({ ...i, id: novo });
+            });
         }
         mapas.forEach((k) => {
           const b = B[k] || {},
