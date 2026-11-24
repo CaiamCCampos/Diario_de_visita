@@ -1868,6 +1868,31 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           start();
         }
       }
+      // conversa com as abas do diário abertas neste navegador (mesmo canal do diário)
+      let canalAbas = null;
+      try {
+        canalAbas = new BroadcastChannel("diario-sessao");
+        canalAbas.addEventListener("message", (e) => {
+          if (e.data !== "alguem?") return;
+          let at = false;
+          try {
+            at = !!sessionStorage.getItem("diario:ativo");
+          } catch (_) {}
+          if (at) canalAbas.postMessage("aqui");
+        });
+      } catch (e) {}
+      const outraAbaAtiva = () =>
+        new Promise((ok) => {
+          if (!canalAbas) return ok(false);
+          const h = (e) => e.data === "aqui" && fim(true);
+          const fim = (v) => {
+            canalAbas.removeEventListener("message", h);
+            ok(v);
+          };
+          canalAbas.addEventListener("message", h);
+          canalAbas.postMessage("alguem?");
+          setTimeout(() => fim(false), 600);
+        });
       async function start() {
         try {
           if (DB.mode === "firebase") {
@@ -1877,6 +1902,13 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
             try {
               ativo = !!sessionStorage.getItem("diario:ativo");
             } catch (e) {}
+            // aberto numa aba nova com o diário aberto em outra aba deste navegador: vale a mesma sessão
+            if (!ativo && (await outraAbaAtiva())) {
+              ativo = true;
+              try {
+                sessionStorage.setItem("diario:ativo", "1");
+              } catch (e) {}
+            }
             if (!S.me || S.me.ativo === false) S.semAcesso = "Seu usuário não tem acesso. Fale com o administrador.";
             else if (!PAPEIS[S.me.papel]) S.semAcesso = "Perfil sem permissão.";
             else if (S.me.papel !== "admin" && !S.me.equipeId) S.semAcesso = "Seu usuário não está associado a uma equipe. Fale com o administrador.";

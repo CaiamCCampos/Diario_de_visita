@@ -1421,6 +1421,41 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         deferido = "",
         ultGrava = 0;
       const limMin = () => Math.max(1, Number((S.cfg || {}).inatividade) || 30);
+      // abas do mesmo navegador dividem o mesmo login do Firebase: elas se reconhecem (navId) e conversam (BroadcastChannel),
+      // para que abrir uma segunda aba não desconecte a primeira e o "um aparelho por login" valha só entre aparelhos diferentes
+      const NAV_ID = (() => {
+        try {
+          let x = localStorage.getItem("diario:navId");
+          if (!x) localStorage.setItem("diario:navId", (x = Math.random().toString(36).slice(2) + Date.now().toString(36)));
+          return x;
+        } catch (e) {
+          return "";
+        }
+      })();
+      let canalAbas = null;
+      try {
+        canalAbas = new BroadcastChannel("diario-sessao");
+        canalAbas.addEventListener("message", (e) => {
+          if (e.data !== "alguem?") return;
+          let at = false;
+          try {
+            at = !!sessionStorage.getItem("diario:ativo");
+          } catch (_) {}
+          if (at) canalAbas.postMessage("aqui");
+        });
+      } catch (e) {}
+      const outraAbaAtiva = () =>
+        new Promise((ok) => {
+          if (!canalAbas) return ok(false);
+          const h = (e) => e.data === "aqui" && fim(true);
+          const fim = (v) => {
+            canalAbas.removeEventListener("message", h);
+            ok(v);
+          };
+          canalAbas.addEventListener("message", h);
+          canalAbas.postMessage("alguem?");
+          setTimeout(() => fim(false), 600);
+        });
       const semPendencia = () => navigator.onLine !== false && gravando === 0 && gravPend.size === 0;
       function barraIdle(txt) {
         let b = document.getElementById("idlebar");
@@ -1512,6 +1547,8 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           ativo = !!sessionStorage.getItem("diario:ativo");
           ult = Number(localStorage.getItem("diario:ultAtiv")) || 0;
         } catch (e) {}
+        // aba nova com outra aba do sistema aberta neste navegador: o navegador não foi fechado
+        if (!fresh && !ativo && (await outraAbaAtiva())) ativo = true;
         if (!fresh) {
           // login restaurado automaticamente pelo navegador
           let motivo = "";
@@ -1530,9 +1567,22 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
           sessionStorage.setItem("diario:ativo", "1");
         } catch (e) {}
         ultAtiv = Date.now();
-        minhaSid = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        const chaveSid = "diario:sid:" + S.user.uid;
+        let sidNav = "",
+          atual = null;
         try {
-          await DB.set("sessoes", S.user.uid, { uid: S.user.uid, email: S.user.email, sid: minhaSid, em: Date.now() });
+          sidNav = localStorage.getItem(chaveSid) || "";
+        } catch (e) {}
+        if (!fresh && sidNav) atual = await DB.get("sessoes", S.user.uid).catch(() => null);
+        try {
+          if (atual && atual.sid === sidNav) minhaSid = sidNav; // outra aba deste navegador já abriu a sessão: usa a mesma
+          else {
+            minhaSid = Math.random().toString(36).slice(2) + Date.now().toString(36);
+            await DB.set("sessoes", S.user.uid, { uid: S.user.uid, email: S.user.email, sid: minhaSid, navId: NAV_ID, em: Date.now() });
+            try {
+              localStorage.setItem(chaveSid, minhaSid);
+            } catch (e) {}
+          }
         } catch (e) {
           console.error(e);
           S.fatal = "Não consegui registrar a sessão: " + (e.code || e.message) + ". Confira as regras do Firestore.";
@@ -1541,7 +1591,9 @@ details.hist .hlc{margin:2px 0 0 10px;overflow-wrap:anywhere}
         }
         unSessao = DB.listen("sessoes", { uid: S.user.uid }, null, (a) => {
           const d = a[0];
-          if (d && d.sid && d.sid !== minhaSid) sair("Sua conta foi aberta em outro aparelho. Esta sessão foi encerrada.");
+          if (!d || !d.sid || d.sid === minhaSid) return;
+          if (NAV_ID && d.navId === NAV_ID) minhaSid = d.sid; // novo login em outra aba deste mesmo navegador: segue junto
+          else sair("Sua conta foi aberta em outro aparelho. Esta sessão foi encerrada.");
         });
         tIdle = setInterval(tickIdle, 10000);
         return true;
