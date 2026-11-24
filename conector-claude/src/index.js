@@ -218,7 +218,7 @@ const FERRAMENTAS = [
     inputSchema: { type: "object", properties: { cliente: { type: "string" }, dias_minimo: { type: "integer", description: "Opcional: só as abertas há pelo menos N dias" }, causa: { type: "string", description: "Opcional: só uma causa (ex.: fibra, alimentação, defeito)" }, limite: { type: "integer" } }, required: ["cliente"] },
     async run(fs, a) {
       const cli = await achaCliente(fs, a.cliente);
-      let L = (await pendAbertas(fs, cli)).map((p) => ({ causa: nomeCausa(p.causa), problema: p.problemaNome || "", titulo: p.titulo || "(sem título)", sistema: p.sis || p.dispSis || "", dispositivo: p.dispTag || p.dispId || "", situacao_do_dispositivo: p.dispStatus || "", problema: p.problema || "", status_no_diario: p.status || "", aberta_em: p.criada, dias_aberta: dias(p.criada), aberta_por: p.criadaPorNome || "", ja_tem_acoes: (p.acoes || []).length > 0 || !!p.diag }));
+      let L = (await pendAbertas(fs, cli)).map((p) => ({ causa: nomeCausa(p.causa), problema: p.problemaNome || "", titulo: p.titulo || "(sem título)", sistema: p.sis || p.dispSis || "", dispositivo: p.dispTag || p.dispId || "", situacao_do_dispositivo: p.dispStatus || "", descricao: p.problema || "", status_no_diario: p.status || "", aberta_em: p.criada, dias_aberta: dias(p.criada), aberta_por: p.criadaPorNome || "", ja_tem_acoes: (p.acoes || []).length > 0 || !!p.diag }));
       if (a.dias_minimo) L = L.filter((p) => p.dias_aberta >= a.dias_minimo);
       if (a.causa) L = L.filter((p) => norm(p.causa).includes(norm(a.causa)));
       const porCausa = {};

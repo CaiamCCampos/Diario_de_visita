@@ -3579,7 +3579,11 @@ label.sdcam { display: inline-block; }
           later("pc:" + o.id, () => commitPend(o), 900);
         }
       }
-      const semTransitorios = ({ concluir, nova, ...r }) => r;
+      const semTransitorios = ({ concluir, nova, _orig, ...r }) => r;
+      // ao encerrar, só vai para o banco o que mudou NESTA visita (ver o diário, index.html)
+      const CAMPOS_VISITA = ["titulo", "tipoId", "eqId", "problema", "diag", "acoes", "solucao", "obs", "texto", "status", "sis", "prioridade", "dispId", "dispSis", "dispTag", "dispIp", "dispPav", "dispStatus", "dispAplicado", "causa", "problemaId", "problemaNome"];
+      const fotoPend = (p) => JSON.parse(JSON.stringify(Object.fromEntries(CAMPOS_VISITA.map((k) => [k, p[k] === undefined ? null : p[k]]))));
+      const mudouNaVisita = (p, k) => (p._orig ? JSON.stringify(p[k] === undefined ? null : p[k]) !== JSON.stringify(p._orig[k] === undefined ? null : p._orig[k]) : ["acoes", "solucao", "obs", "texto"].includes(k));
 
       document.addEventListener("click", (e) => {
         const im = e.target.closest && e.target.closest(".sdf img");
@@ -3947,7 +3951,7 @@ label.sdcam { display: inline-block; }
           const pend = (await DB.list("pendencias", fCli(c)))
             .filter((p) => p.aberta && !p.desconsiderada)
             .sort((a, b) => String(a.criada).localeCompare(String(b.criada)))
-            .map((p) => ({ ...clone(p), concluir: false }));
+            .map((p) => ({ ...clone(p), concluir: false, _orig: fotoPend(p) }));
           const v = {
             id: vid,
             excecao: !!aut,
@@ -4081,7 +4085,7 @@ label.sdcam { display: inline-block; }
               const cur = await DB.get("pendencias", p.id);
               if (!cur) continue;
               const antes = baseP(cur);
-              ["acoes", "solucao", "obs", "texto"].forEach((k) => (cur[k] = p[k]));
+              ["acoes", "solucao", "obs", "texto"].forEach((k) => mudouNaVisita(p, k) && (cur[k] = p[k]));
               const dif = difPend(antes, cur);
               if (p.concluir && cur.aberta) {
                 cur.aberta = false;
@@ -4094,6 +4098,14 @@ label.sdcam { display: inline-block; }
               continue;
             }
             const cur0 = p.nova ? null : await DB.get("pendencias", p.id).catch(() => null);
+            if (!p.nova && !cur0) continue;
+            if (cur0) {
+              const base = { ...cur0, concluir: p.concluir };
+              CAMPOS_VISITA.forEach((k) => mudouNaVisita(p, k) && (base[k] = p[k]));
+              Object.keys(p).forEach((k) => delete p[k]);
+              Object.assign(p, base);
+            }
+            if (cur0 && cur0.desconsiderada && !p.concluir) continue;
             const dif0 = cur0 ? difPend(cur0, p) : [];
             p.clienteId = c.id;
             p.equipeId = c.equipeId;
