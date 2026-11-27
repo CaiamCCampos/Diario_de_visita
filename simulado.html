@@ -6711,6 +6711,11 @@ label.sdcam { display: inline-block; }
         if (semFoto.length) r.push("sem foto em: " + semFoto.join(", "));
         if (e.data <= (e.ant.data || "")) r.push("a data do simulado não é depois do ensaio anterior");
         if (!String(e.exec[0] || "").trim()) r.push("técnico não informado");
+        if (!e.horaIni || !e.horaFim) r.push("horário de início ou término vazio");
+        // acionadores e detectores começam vazios: o técnico adiciona cada um testado
+        const I = (S.sdB && S.sdB.info) || { tem: {} };
+        if (I.tem && I.tem.acion && !(e.ev.acion || []).length) r.push("nenhum acionador manual adicionado (Pontuais › Acionadores manuais)");
+        if (I.tem && I.tem.det && !(e.ev.det || []).length) r.push("nenhum detector adicionado (Pontuais › Detectores)");
         return r;
       }
       // gira a foto 90° (grava de novo)
@@ -6929,6 +6934,8 @@ label.sdcam { display: inline-block; }
         },
         sdGerar() {
           flushAll();
+          const falta = S.sd && sdEditavel() ? sdFaltas() : [];
+          if (falta.length && !confirm("Ainda falta:\n- " + falta.join("\n- ") + "\n\nGerar o Word mesmo assim?")) return;
           sdWord(false);
         },
         sdPrevia() {
